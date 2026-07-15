@@ -56,6 +56,7 @@ limitations under the License.
 
     <javac srcdir="${src.dir}" destdir="${class.dir}"
            release="8"
+           encoding="UTF-8"
            debug="true"
            debuglevel="lines,source"
            deprecation="on"
@@ -68,6 +69,7 @@ limitations under the License.
 
     <javac srcdir="${src25.dir}" destdir="${class25.dir}"
            release="25"
+           encoding="UTF-8"
            debug="true"
            debuglevel="lines,source"
            deprecation="on"

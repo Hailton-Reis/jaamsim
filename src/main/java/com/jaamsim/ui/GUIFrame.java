@@ -204,6 +204,7 @@ public class GUIFrame extends OSFixJFrame implements GUIListener {
 	private JSpinner spinner;
 
 	private JButton fileSave;
+	private JButton aiAssistantButton;
 	private JButton undo;
 	private JButton redo;
 	private JButton undoDropdown;
@@ -942,7 +943,30 @@ public class GUIFrame extends OSFixJFrame implements GUIListener {
 		} );
 		toolsMenu.add( eventsMenuItem );
 
-		// 10) "Reset Positions and Sizes" menu item
+		// 10) "Assistente de Simulacao IA" menu item
+		JMenuItem aiAssistantMenuItem = new JMenuItem( "Assistente de Simulacao IA" );
+		aiAssistantMenuItem.addActionListener( new ActionListener() {
+
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				showAIAssistant();
+			}
+		} );
+		toolsMenu.addSeparator();
+		toolsMenu.add( aiAssistantMenuItem );
+
+		// 11) "StatFit Assistente" menu item
+		JMenuItem statFitAssistantMenuItem = new JMenuItem( "StatFit Assistente" );
+		statFitAssistantMenuItem.addActionListener( new ActionListener() {
+
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				showStatFitAssistant();
+			}
+		} );
+		toolsMenu.add( statFitAssistantMenuItem );
+
+		// 12) "Reset Positions and Sizes" menu item
 		JMenuItem resetItem = new JMenuItem( "Reset Positions and Sizes" );
 		resetItem.setMnemonic(KeyEvent.VK_R);
 		resetItem.addActionListener(new ActionListener() {
@@ -1356,6 +1380,10 @@ public class GUIFrame extends OSFixJFrame implements GUIListener {
 		buttonBar.addSeparator(separatorDim);
 		addUndoButtons(buttonBar, noMargin);
 
+		// Native TCC assistant shortcuts
+		buttonBar.addSeparator(separatorDim);
+		addNativeAssistantButtons(buttonBar, smallMargin);
+
 		// Presentation Mode button
 		buttonBar.addSeparator(separatorDim);
 		addPresentationModeButton(buttonBar, noMargin);
@@ -1495,6 +1523,104 @@ public class GUIFrame extends OSFixJFrame implements GUIListener {
 			}
 		} );
 		buttonBar.add( fileOpen );
+	}
+
+	private void addNativeAssistantButtons(JToolBar buttonBar, Insets margin) {
+		aiAssistantButton = new JButton("IA");
+		aiAssistantButton.setMargin(margin);
+		aiAssistantButton.setFocusPainted(false);
+		aiAssistantButton.setOpaque(true);
+		aiAssistantButton.setBackground(new Color(232, 241, 252));
+		aiAssistantButton.setForeground(new Color(30, 75, 130));
+		aiAssistantButton.setToolTipText(formatToolTip("Assistente de Simulacao IA",
+				"Abre o copiloto local de modelagem."));
+		aiAssistantButton.addActionListener( new ActionListener() {
+
+			@Override
+			public void actionPerformed(ActionEvent event) {
+				showAIAssistant();
+				controlStartResume.requestFocusInWindow();
+			}
+		} );
+		buttonBar.add( aiAssistantButton );
+
+		buttonBar.add(Box.createRigidArea(new Dimension(5, aiAssistantButton.getPreferredSize().height)));
+
+		JButton statFitAssistant = new JButton("StatFit");
+		statFitAssistant.setMargin(margin);
+		statFitAssistant.setFocusPainted(false);
+		statFitAssistant.setOpaque(true);
+		statFitAssistant.setBackground(new Color(232, 246, 240));
+		statFitAssistant.setForeground(new Color(35, 78, 62));
+		statFitAssistant.setToolTipText(formatToolTip("StatFit Assistente",
+				"Abre o assistente local de distribuicoes."));
+		statFitAssistant.addActionListener( new ActionListener() {
+
+			@Override
+			public void actionPerformed(ActionEvent event) {
+				showStatFitAssistant();
+				controlStartResume.requestFocusInWindow();
+			}
+		} );
+		buttonBar.add( statFitAssistant );
+	}
+
+	private void showAIAssistant() {
+		clearPresentationMode();
+		AIAssistantBox box = AIAssistantBox.getInstance();
+		box.setVisible(true);
+		box.toFront();
+	}
+
+	private void showStatFitAssistant() {
+		clearPresentationMode();
+		StatFitAssistantBox box = StatFitAssistantBox.getInstance();
+		box.setVisible(true);
+		box.toFront();
+	}
+
+	public static void showAIAssistantNotification(String message) {
+		GUIFrame gui = getInstance();
+		if (gui == null || gui.aiAssistantButton == null)
+			return;
+
+		SwingUtilities.invokeLater(() -> {
+			if (!gui.aiAssistantButton.isShowing())
+				return;
+
+			Color originalBackground = gui.aiAssistantButton.getBackground();
+			Color originalForeground = gui.aiAssistantButton.getForeground();
+			gui.aiAssistantButton.setText("IA*");
+			gui.aiAssistantButton.setBackground(new Color(255, 242, 185));
+			gui.aiAssistantButton.setForeground(new Color(85, 60, 0));
+			gui.aiAssistantButton.setToolTipText(formatToolTip("Assistente de Simulacao IA",
+					"Novo aviso: " + message));
+
+			JPopupMenu popup = new JPopupMenu();
+			JPanel notificationPanel = new JPanel(new BorderLayout(4, 4));
+			notificationPanel.setBackground(new Color(255, 252, 235));
+			notificationPanel.setBorder(new EmptyBorder(8, 10, 8, 10));
+			JLabel title = new JLabel("Assistente IA");
+			title.setFont(title.getFont().deriveFont(Font.BOLD));
+			title.setForeground(new Color(85, 60, 0));
+			JLabel label = new JLabel("<html><body style='width:280px'>" + message + "</body></html>");
+			notificationPanel.add(title, BorderLayout.NORTH);
+			notificationPanel.add(label, BorderLayout.CENTER);
+			popup.add(notificationPanel);
+			popup.show(gui.aiAssistantButton, 0, gui.aiAssistantButton.getHeight());
+
+			javax.swing.Timer timer = new javax.swing.Timer(4500, new ActionListener() {
+				@Override
+				public void actionPerformed(ActionEvent event) {
+					popup.setVisible(false);
+					gui.aiAssistantButton.setText("IA");
+					gui.aiAssistantButton.setBackground(originalBackground);
+					gui.aiAssistantButton.setForeground(originalForeground);
+				}
+			});
+			timer.setRepeats(false);
+			timer.start();
+		});
 	}
 
 	private void addFileSaveButton(JToolBar buttonBar, Insets margin) {
@@ -4229,6 +4355,7 @@ public class GUIFrame extends OSFixJFrame implements GUIListener {
 		Log.format("Java: %s (version: %s)",
 				System.getProperty("java.vendor"), System.getProperty("java.version"));
 		Log.format("Software: %s (version: %s)%n", AboutBox.softwareName, AboutBox.version);
+		Log.format("EventManager Implementation: %s%n", EventManager.getImplementation());
 
 		// Create a graphic simulation
 		JaamSimModel simModel = getNextJaamSimModel();
