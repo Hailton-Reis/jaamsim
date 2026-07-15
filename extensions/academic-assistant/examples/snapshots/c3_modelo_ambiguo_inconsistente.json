@@ -1,0 +1,49 @@
+{
+  "model_id": "c3_modelo_ambiguo_inconsistente",
+  "case_id": "C3",
+  "variant": "inconsistent",
+  "title": "Modelo com retrabalho - variante ambigua",
+  "objective": "Avaliar uma politica de retrabalho em um processo produtivo.",
+  "components": [
+    {
+      "id": "processo_principal",
+      "name": "Processo principal",
+      "type": "process",
+      "description": "Executa operacao principal."
+    },
+    {
+      "id": "decisao_qualidade",
+      "name": "Decisao de qualidade",
+      "type": "decision",
+      "description": "Direciona itens conforme resultado de qualidade."
+    },
+    {
+      "id": "retrabalho",
+      "name": "Retrabalho",
+      "type": "process",
+      "description": "Componente de retrabalho sem regra operacional explicita."
+    }
+  ],
+  "connections": [
+    {
+      "from": "processo_principal",
+      "to": "decisao_qualidade",
+      "type": "entity_flow"
+    },
+    {
+      "from": "decisao_qualidade",
+      "to": "retrabalho",
+      "type": "conditional_flow"
+    }
+  ],
+  "resources": [],
+  "metrics": [
+    {
+      "id": "tempo_ciclo",
+      "name": "Tempo de ciclo",
+      "target": "processo_principal"
+    }
+  ],
+  "assumptions": [],
+  "notes": "Snapshot parcial sem origem, saida aprovada e premissa de roteamento."
+}

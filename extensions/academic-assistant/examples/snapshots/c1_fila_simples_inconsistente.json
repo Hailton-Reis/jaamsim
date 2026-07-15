@@ -1,0 +1,38 @@
+{
+  "model_id": "c1_fila_simples_inconsistente",
+  "case_id": "C1",
+  "variant": "inconsistent",
+  "title": "Fila de atendimento simples - variante com inconsistencias",
+  "objective": "Avaliar tempo de espera e utilizacao do servidor em um sistema de atendimento simples.",
+  "components": [
+    {
+      "id": "source_clientes",
+      "name": "Chegada de clientes",
+      "type": "source",
+      "description": "Gera entidades cliente."
+    },
+    {
+      "id": "fila_espera",
+      "name": "Fila de espera",
+      "type": "queue",
+      "description": "Armazena clientes antes do atendimento."
+    }
+  ],
+  "connections": [
+    {
+      "from": "source_clientes",
+      "to": "fila_espera",
+      "type": "entity_flow"
+    }
+  ],
+  "resources": [
+    {
+      "id": "servidor_01",
+      "name": "Servidor 01",
+      "used_by": []
+    }
+  ],
+  "metrics": [],
+  "assumptions": [],
+  "notes": "Snapshot propositalmente sem atendimento, saida, uso do servidor e metricas."
+}

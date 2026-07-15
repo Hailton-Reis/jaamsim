@@ -1,0 +1,128 @@
+{
+  "model_id": "c2_processo_sequencial_referencia",
+  "case_id": "C2",
+  "variant": "reference",
+  "title": "Processo produtivo sequencial - modelo de referencia",
+  "objective": "Avaliar throughput, tempo de ciclo e utilizacao de recursos em um fluxo produtivo sequencial.",
+  "components": [
+    {
+      "id": "source_itens",
+      "name": "Entrada de itens",
+      "type": "source",
+      "description": "Gera itens a serem processados."
+    },
+    {
+      "id": "fila_preparacao",
+      "name": "Fila de preparacao",
+      "type": "queue",
+      "description": "Buffer antes da preparacao."
+    },
+    {
+      "id": "preparacao",
+      "name": "Preparacao",
+      "type": "process",
+      "description": "Prepara o item para processamento."
+    },
+    {
+      "id": "fila_processamento",
+      "name": "Fila de processamento",
+      "type": "queue",
+      "description": "Buffer antes do processamento principal."
+    },
+    {
+      "id": "processamento",
+      "name": "Processamento",
+      "type": "process",
+      "description": "Executa a transformacao principal."
+    },
+    {
+      "id": "inspecao",
+      "name": "Inspecao",
+      "type": "process",
+      "description": "Inspeciona o item apos processamento."
+    },
+    {
+      "id": "saida_itens",
+      "name": "Saida de itens",
+      "type": "sink",
+      "description": "Remove itens finalizados."
+    }
+  ],
+  "connections": [
+    {
+      "from": "source_itens",
+      "to": "fila_preparacao",
+      "type": "entity_flow"
+    },
+    {
+      "from": "fila_preparacao",
+      "to": "preparacao",
+      "type": "entity_flow"
+    },
+    {
+      "from": "preparacao",
+      "to": "fila_processamento",
+      "type": "entity_flow"
+    },
+    {
+      "from": "fila_processamento",
+      "to": "processamento",
+      "type": "entity_flow"
+    },
+    {
+      "from": "processamento",
+      "to": "inspecao",
+      "type": "entity_flow"
+    },
+    {
+      "from": "inspecao",
+      "to": "saida_itens",
+      "type": "entity_flow"
+    }
+  ],
+  "resources": [
+    {
+      "id": "operador_preparacao",
+      "name": "Operador de preparacao",
+      "used_by": [
+        "preparacao"
+      ]
+    },
+    {
+      "id": "maquina_processamento",
+      "name": "Maquina de processamento",
+      "used_by": [
+        "processamento"
+      ]
+    },
+    {
+      "id": "inspetor_qualidade",
+      "name": "Inspetor de qualidade",
+      "used_by": [
+        "inspecao"
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "id": "throughput",
+      "name": "Throughput",
+      "target": "saida_itens"
+    },
+    {
+      "id": "tempo_ciclo",
+      "name": "Tempo de ciclo",
+      "target": "source_itens:saida_itens"
+    },
+    {
+      "id": "utilizacao_maquina",
+      "name": "Utilizacao da maquina",
+      "target": "maquina_processamento"
+    }
+  ],
+  "assumptions": [
+    "A inspeção ocorre somente apos o processamento principal.",
+    "Itens aprovados saem do sistema."
+  ],
+  "notes": "Snapshot de controle negativo para o caso C2."
+}

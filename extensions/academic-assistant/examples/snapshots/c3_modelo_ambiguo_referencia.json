@@ -1,0 +1,105 @@
+{
+  "model_id": "c3_modelo_ambiguo_referencia",
+  "case_id": "C3",
+  "variant": "reference",
+  "title": "Modelo com retrabalho - referencia com premissas documentadas",
+  "objective": "Avaliar impacto de retrabalho no tempo de ciclo e na quantidade de itens aprovados.",
+  "components": [
+    {
+      "id": "source_itens",
+      "name": "Entrada de itens",
+      "type": "source",
+      "description": "Gera itens para processamento."
+    },
+    {
+      "id": "processo_principal",
+      "name": "Processo principal",
+      "type": "process",
+      "description": "Executa operacao principal."
+    },
+    {
+      "id": "decisao_qualidade",
+      "name": "Decisao de qualidade",
+      "type": "decision",
+      "description": "Direciona itens aprovados para saida e reprovados para retrabalho."
+    },
+    {
+      "id": "retrabalho",
+      "name": "Retrabalho",
+      "type": "process",
+      "description": "Corrige itens reprovados antes de retornar ao processo principal."
+    },
+    {
+      "id": "saida_aprovados",
+      "name": "Saida de aprovados",
+      "type": "sink",
+      "description": "Remove itens aprovados do sistema."
+    }
+  ],
+  "connections": [
+    {
+      "from": "source_itens",
+      "to": "processo_principal",
+      "type": "entity_flow"
+    },
+    {
+      "from": "processo_principal",
+      "to": "decisao_qualidade",
+      "type": "entity_flow"
+    },
+    {
+      "from": "decisao_qualidade",
+      "to": "saida_aprovados",
+      "type": "approved_flow"
+    },
+    {
+      "from": "decisao_qualidade",
+      "to": "retrabalho",
+      "type": "rework_flow"
+    },
+    {
+      "from": "retrabalho",
+      "to": "processo_principal",
+      "type": "entity_flow"
+    }
+  ],
+  "resources": [
+    {
+      "id": "operador_processo",
+      "name": "Operador do processo",
+      "used_by": [
+        "processo_principal"
+      ]
+    },
+    {
+      "id": "operador_retrabalho",
+      "name": "Operador de retrabalho",
+      "used_by": [
+        "retrabalho"
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "id": "tempo_ciclo",
+      "name": "Tempo de ciclo",
+      "target": "source_itens:saida_aprovados"
+    },
+    {
+      "id": "itens_aprovados",
+      "name": "Itens aprovados",
+      "target": "saida_aprovados"
+    },
+    {
+      "id": "taxa_retrabalho",
+      "name": "Taxa de retrabalho",
+      "target": "decisao_qualidade"
+    }
+  ],
+  "assumptions": [
+    "A decisao de qualidade reprova 12% dos itens.",
+    "Itens reprovados retornam ao processo principal apos retrabalho.",
+    "Itens aprovados saem do sistema."
+  ],
+  "notes": "Snapshot de controle negativo para o caso C3."
+}

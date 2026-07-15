@@ -2,3 +2,16 @@
 build.log
 build.log.old
 *.class
+.idea/
+.vscode/
+.venv/
+*.iml
+*.log
+*.py[cod]
+__pycache__/
+.pytest_cache/
+.env
+.env.*
+!.env.example
+extensions/academic-assistant/output/*
+!extensions/academic-assistant/output/.gitkeep

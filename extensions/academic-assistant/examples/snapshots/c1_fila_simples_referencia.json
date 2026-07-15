@@ -1,0 +1,81 @@
+{
+  "model_id": "c1_fila_simples_referencia",
+  "case_id": "C1",
+  "variant": "reference",
+  "title": "Fila de atendimento simples - modelo de referencia",
+  "objective": "Avaliar tempo de espera, clientes atendidos e utilizacao do servidor em um sistema de atendimento simples.",
+  "components": [
+    {
+      "id": "source_clientes",
+      "name": "Chegada de clientes",
+      "type": "source",
+      "description": "Gera entidades cliente conforme padrao de chegada."
+    },
+    {
+      "id": "fila_espera",
+      "name": "Fila de espera",
+      "type": "queue",
+      "description": "Armazena clientes antes do atendimento."
+    },
+    {
+      "id": "atendimento",
+      "name": "Atendimento",
+      "type": "process",
+      "description": "Representa o atendimento realizado pelo servidor."
+    },
+    {
+      "id": "saida_clientes",
+      "name": "Saida de clientes",
+      "type": "sink",
+      "description": "Remove clientes atendidos do sistema."
+    }
+  ],
+  "connections": [
+    {
+      "from": "source_clientes",
+      "to": "fila_espera",
+      "type": "entity_flow"
+    },
+    {
+      "from": "fila_espera",
+      "to": "atendimento",
+      "type": "entity_flow"
+    },
+    {
+      "from": "atendimento",
+      "to": "saida_clientes",
+      "type": "entity_flow"
+    }
+  ],
+  "resources": [
+    {
+      "id": "servidor_01",
+      "name": "Servidor 01",
+      "used_by": [
+        "atendimento"
+      ]
+    }
+  ],
+  "metrics": [
+    {
+      "id": "tempo_espera_medio",
+      "name": "Tempo medio de espera",
+      "target": "fila_espera"
+    },
+    {
+      "id": "utilizacao_servidor",
+      "name": "Utilizacao do servidor",
+      "target": "servidor_01"
+    },
+    {
+      "id": "clientes_atendidos",
+      "name": "Clientes atendidos",
+      "target": "saida_clientes"
+    }
+  ],
+  "assumptions": [
+    "Clientes seguem fluxo unico de atendimento.",
+    "Servidor 01 atende um cliente por vez."
+  ],
+  "notes": "Snapshot de controle negativo para o caso C1."
+}
