@@ -8,6 +8,8 @@ authors:
 version: 0.1.0
 date-released: 2026-07-14
 license: Apache-2.0
+repository-code: "https://github.com/Hailton-Reis/jaamsim"
+url: "https://github.com/Hailton-Reis/jaamsim/tree/academic-assistants-v2026-03"
 keywords:
   - discrete-event simulation
   - conceptual modeling
