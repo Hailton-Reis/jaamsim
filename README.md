@@ -1,74 +1,186 @@
-# What is this?
+# JaamSim Academic Assistant
 
-JaamSim is a Java based discrete-event simulation environment developed since 2002 and includes: 
-- drag-and-drop user interface 
-- interactive 3D graphics 
-- input and output processing 
-- model development tools and editors. 
+Experimental academic fork of [JaamSim](https://github.com/jaamsim/jaamsim) that adds an assistive review layer for discrete-event simulation models.
 
-Examples of our simulation models can be seen at: 
-www.youtube.com/c/jaamsim. 
+This repository is based on JaamSim `v2026-03` and contains two optional native tools:
 
-The key feature that makes JaamSim different from commercial off-the-shelf 
-simulation software is that it allows a user to develop new palettes of 
-high-level objects for a given application. These objects will automatically 
-have 3D graphics, be available in the drag-and-drop interface, and have their 
-inputs editable through the Input Editor. Users can focus on the logic for their 
-objects without having to program a user interface and input/output processing. 
+- **AI Simulation Assistant:** deterministic model review, guided briefing, and optional online explanation;
+- **StatFit-like Assistant:** local data preparation, descriptive statistics, candidate distribution fitting, plots, and JaamSim snippets.
 
-All the coding for new objects is done in standard Java using standard 
-development tools such as Eclipse. There is no need for the specialised 
-simulation languages, process flow diagrams, or scripting languages used by 
-commercial off-the-shelf simulation software. Model logic can be coded directly 
-in either a event- or process-oriented style using a few simple classes and 
-methods provided by JaamSim.
+The evaluated research core is deterministic. Online language models are optional and do not decide whether a model is valid.
 
-The present release includes the following palettes:
-- Graphic objects: static 3D objects, overlay text, clock, arrow, graph, etc.
-- Probability distributions: uniform, triangular, normal, erlang, gamma, weibull, etc.
-- Basic objects: generator, sink, server, queue, delay, resource, branch, time series, etc.
-- Calculation objects: weighted sum, polynomial, integrator, differentiator, etc.
-- Fluid objects: tank, pipe, pump, etc.
+> Research status: undergraduate academic prototype. It is not an official JaamSim release, is not endorsed by JaamSim Software Inc., and contains no JaamSim Pro source code.
 
-The JaamSim executable, user manuals, examples, and technical articles can be downloaded
-from:
-http://jaamsim.com
+![JaamSim toolbar with academic assistant controls](docs/academic-assistant/screenshots/jaamsim-toolbar.png)
 
-# Dependencies and Installation
+## Why this fork exists
 
-A copy of all dependencies is shipped in the jar/ folder and are as follows:
-- JOGL2 (from jogamp.org)
+Simulation software can execute a syntactically valid model while conceptual omissions remain unnoticed. This extension explores a review workflow that makes basic checks explicit and traceable before the operator accepts changes.
 
-Run the ant build tool in the topmost directory to produce build products
-in build/jars/
+The prototype can inspect a structured model snapshot and report conditions such as disconnected flow, queue or process endpoints, unused resources, missing metrics, undocumented decision rules, and insufficient model structure. Every finding identifies the deterministic rule that produced it.
 
-# License
+## Architecture
 
-JaamSim is Licensed under the Apache License, Version 2.0
+The JaamSim batch evidence and the conceptual review are parallel branches. A `.dat` file is **not** converted into a snapshot.
 
-# Contact
+```text
+                                  +-> JaamSim batch -> .dat --------+
+JaamSim .cfg ---------------------+                                 +-> evidence report
+                                  +-> cfg converter -> snapshot ----+
+                                                        -> RCL rules
+```
 
-For licensing and general inquiries:
-Dr. Harry King <d.harry.king@gmail.com>
+The current public extension contains:
 
-If you have any problems building the source or technical inquiries:
-Harvey Harrison <harvey.harrison@gmail.com>
+```text
+extensions/academic-assistant/
+|-- examples/
+|   |-- jaamsim/        synthetic .cfg cases
+|   |-- snapshots/      controlled JSON snapshots
+|   `-- statfit/        synthetic numeric data
+|-- python/             deterministic and optional helper scripts
+|   `-- tests/
+`-- output/             local generated artifacts, ignored by Git
+```
 
-# Citing JaamSim
+See [Architecture](docs/academic-assistant/ARCHITECTURE.md) and [Research scope](docs/academic-assistant/RESEARCH_SCOPE.md).
 
-[![DOI](https://zenodo.org/badge/doi/10.5281/zenodo.57118.svg)](http://dx.doi.org/10.5281/zenodo.57118)
+## Requirements
 
-Please Cite JaamSim as the following, replacing the version with the version used in your paper.
+- JDK 25 for the current JaamSim build;
+- Apache Ant 1.10 or later;
+- Python 3.11 or later;
+- Git.
 
-JaamSim Development Team (2016). JaamSim: Discrete-Event Simulation Software. Version 2016-14. URL http://jaamsim.com. doi:10.5281/zenodo.57118
+The public cleanup was verified with Python 3.14.4, JDK 25.0.3, and Apache Ant 1.10.17. The JaamSim runtime still follows the upstream platform requirements.
 
-BibText entry:
+## Quick start
 
-@Manual{,
-    title = {JaamSim: Discrete-Event Simulation Software},
-    author = {{JaamSim Development Team}},
-    year = {2016},
-    note = {Version 2016-14},
-    url = {http://jaamsim.com},
-    doi = {10.5281/zenodo.57118}
-  }
+### 1. Prepare Python tooling
+
+Runtime helpers use the Python standard library. `pytest` is needed only for the test suite.
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r extensions\academic-assistant\requirements-dev.txt
+python -m pytest extensions\academic-assistant\python\tests
+```
+
+### 2. Build JaamSim
+
+On Windows:
+
+```powershell
+.\scripts\build.ps1
+```
+
+On Linux or macOS:
+
+```bash
+./scripts/build.sh
+```
+
+The JAR is written to `build/jars/JaamSim2026-03.jar`.
+
+### 3. Start the custom build
+
+```powershell
+java -jar build\jars\JaamSim2026-03.jar
+```
+
+When JaamSim starts from the repository root, the extension is discovered automatically. If the JAR is moved elsewhere, set the root explicitly:
+
+```powershell
+$env:JAAMSIM_ASSISTANT_ROOT = "C:\path\to\jaamsim\extensions\academic-assistant"
+```
+
+Equivalent JVM property:
+
+```text
+-Djaamsim.assistant.root=/path/to/jaamsim/extensions/academic-assistant
+```
+
+Use `JAAMSIM_PYTHON` or `-Djaamsim.python=...` when `python` is not the desired interpreter.
+
+## Run the deterministic analyzer
+
+Analyze all controlled snapshots:
+
+```powershell
+python extensions\academic-assistant\python\snapshot_analyzer.py
+```
+
+Review one JaamSim `.cfg` locally:
+
+```powershell
+python extensions\academic-assistant\python\modulo_ia_offline.py `
+  extensions\academic-assistant\examples\jaamsim\c1_fila_simples_inconsistente.cfg
+```
+
+The review produces JSON and Markdown evidence under `extensions/academic-assistant/output/`.
+
+## Run the StatFit-like helper
+
+```powershell
+python extensions\academic-assistant\python\statfit_auxiliar.py `
+  extensions\academic-assistant\examples\statfit\exemplo_dados_tempos.csv `
+  --column tempo_atendimento
+```
+
+The module is a screening aid. Distribution selection still requires statistical judgment, domain knowledge, and validation.
+
+## Optional online assistance
+
+The offline rules do not need API keys. Online explanation is opt-in.
+
+1. Copy `extensions/academic-assistant/.env.example` to `extensions/academic-assistant/.env`.
+2. Add only the provider variables you intend to use.
+3. Keep `.env` local; it is ignored by Git.
+
+Never commit tokens, private models, production data, or personal simulation files. See [SECURITY.md](SECURITY.md).
+
+## Screenshots
+
+### Simulation assistant
+
+![Native simulation assistant](docs/academic-assistant/screenshots/ai-assistant.png)
+
+### StatFit-like assistant
+
+![Native StatFit-like assistant](docs/academic-assistant/screenshots/statfit-assistant.png)
+
+## Evidence and limits
+
+The controlled evaluation contains reference and inconsistent variants for three synthetic cases:
+
+| Case | Focus | Inconsistent variant |
+|---|---|---|
+| C1 | simple queue | RCL03, RCL04, RCL07, RCL10 |
+| C2 | sequential process | RCL01, RCL02, RCL05, RCL07, RCL09 |
+| C3 | decision and rework | RCL06, RCL08, RCL10 |
+
+Reference snapshots produce no alerts in this controlled matrix. This is preliminary evidence, not proof of general validity. The current parser supports a subset of JaamSim configuration constructs, and the rule set can produce false positives or false negatives outside the tested cases.
+
+## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull request. Changes should preserve:
+
+- deterministic findings as the primary decision path;
+- human confirmation before model modification;
+- reproducible tests for every rule or parser change;
+- a strict boundary between offline analysis and optional network calls;
+- upstream JaamSim attribution.
+
+## Upstream and attribution
+
+JaamSim is developed by JaamSim Software Inc. The original project, documentation, citation guidance, and releases are available at:
+
+- <https://github.com/jaamsim/jaamsim>
+- <https://jaamsim.com>
+
+The original upstream README is preserved at [docs/UPSTREAM_README.md](docs/UPSTREAM_README.md). Modified files are listed in [CHANGES.md](CHANGES.md).
+
+## License
+
+This fork is distributed under the Apache License 2.0, consistent with the upstream project. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

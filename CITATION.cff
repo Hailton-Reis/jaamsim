@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use this academic extension, cite both this work and the upstream JaamSim project."
+title: "JaamSim Academic Assistant"
+type: software
+authors:
+  - family-names: "Reis"
+    given-names: "Hailton Santos"
+version: 0.1.0
+date-released: 2026-07-14
+license: Apache-2.0
+keywords:
+  - discrete-event simulation
+  - conceptual modeling
+  - JaamSim
+  - deterministic rules
+  - academic prototype
