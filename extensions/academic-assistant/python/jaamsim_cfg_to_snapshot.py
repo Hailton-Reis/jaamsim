@@ -324,6 +324,7 @@ def build_distributions(model: CfgModel) -> list[dict[str, Any]]:
             {
                 "id": to_id(name),
                 "name": humanize(name),
+                "jaamsim_name": name,
                 "type": jaamsim_class,
                 "parameters": dict(model.inputs.get(name, {})),
             }
