@@ -8,6 +8,7 @@ on:
       - "extensions/academic-assistant/python/**"
       - "build.xml"
       - "scripts/build.sh"
+      - "scripts/package_native_candidate.py"
       - ".github/workflows/jaamsim-java-build.yml"
   workflow_dispatch:
 
@@ -45,7 +46,16 @@ jobs:
           jar tf "$jar_file" | grep -qx "com/jaamsim/ui/AIAssistantBox.class"
           jar tf "$jar_file" | grep -qx "com/jaamsim/ui/StatFitAssistantBox.class"
           echo "CANDIDATE_BUILT_NO_GUI_ACCEPTANCE $(sha256sum "$jar_file")"
-      - name: Upload unvalidated candidate JAR for manual GUI inspection
+      - name: Package native candidate with Python support
+        shell: bash
+        run: python3 scripts/package_native_candidate.py
+      - name: Upload standalone review package (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: jaamsim-native-candidate-complete
+          path: build/dist/jaam-ai-native-candidate.zip
+          retention-days: 7
+      - name: Upload unvalidated candidate JAR separately
         uses: actions/upload-artifact@v4
         with:
           name: jaamsim-native-candidate
