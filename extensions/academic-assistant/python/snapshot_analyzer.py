@@ -35,8 +35,8 @@ REQUIRED_TOP_LEVEL_FIELDS = {
     "assumptions",
 }
 
-FLOW_COMPONENT_TYPES = {"source", "queue", "process", "decision", "sink"}
-FLOW_CONNECTION_TYPES = {"entity_flow", "approved_flow", "rework_flow", "conditional_flow"}
+FLOW_COMPONENT_TYPES = {"source", "queue", "process", "decision", "operation", "sink"}
+FLOW_CONNECTION_TYPES = {"entity_flow", "approved_flow", "rework_flow", "conditional_flow", "duplicate_flow"}
 ESSENTIAL_TYPES = {"source", "sink"}
 METRIC_KEYWORDS = {
     "tempo": ("tempo", "espera", "ciclo"),
@@ -206,7 +206,7 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
     reaches_sink = can_reach_sink(snapshot)
     alerts: list[Alert] = []
     types = {component.get("type") for component in components.values()}
-    has_intermediate = bool(types & {"queue", "process", "decision"})
+    has_intermediate = bool(types & {"queue", "process", "decision", "operation"})
     structurally_insufficient = not {"source", "sink"} <= types or not has_intermediate
 
     # Avoid cascading structural alerts when the whole snapshot is still too partial.
@@ -239,7 +239,7 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
         # RCL02: queue/process/decision without incoming or outgoing flow.
         for cid, component in components.items():
             ctype = component.get("type")
-            if ctype in {"queue", "process", "decision"} and (
+            if ctype in {"queue", "process", "decision", "operation"} and (
                 not incoming.get(cid) or not outgoing.get(cid)
             ):
                 alerts.append(
@@ -274,7 +274,7 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
         if component.get("type") != "queue":
             continue
         outgoing_types = [components[target].get("type") for target in outgoing.get(cid, [])]
-        if not any(target_type in {"process", "decision", "sink"} for target_type in outgoing_types):
+        if not any(target_type in {"process", "decision", "operation", "sink"} for target_type in outgoing_types):
             alerts.append(
                 alert(
                     "RCL04",
@@ -662,23 +662,32 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
         )
 
     for resource in snapshot.get("resources", []):
-        if isinstance(resource, dict):
-            params = nested_mapping(resource.get("parameters"), resource.get("inputs"), resource)
-            if (resource.get("parameters") or resource.get("inputs")) and not has_any_key(
-                params,
-                {"capacity", "capacidade", "units", "quantity", "number"},
-            ):
-                alerts.append(
-                    alert(
-                        "RCL23",
-                        "media",
-                        str(resource.get("id") or resource.get("name") or "resource"),
-                        f"O recurso '{resource.get('name', resource.get('id', 'sem_nome'))}' nao declara capacidade.",
-                        "Capacidade ausente impede interpretar utilizacao, fila e gargalo.",
-                        "Declare numero de unidades, capacidade simultanea ou turno disponivel.",
-                        {"resource": resource},
-                    )
+        if not isinstance(resource, dict):
+            continue
+        params = nested_mapping(resource.get("parameters"), resource.get("inputs"), resource)
+        jaamsim_class = str(resource.get("jaamsim_class") or "").casefold()
+        provenance = str(resource.get("provenance") or "")
+        derived_placeholder = provenance == "DERIVED_PROCESS_CAPACITY_PLACEHOLDER"
+        # Capacity is a keyword of Resource. ResourcePool derives capacity
+        # from member units; ResourceUnit is normally a single resource.
+        requires_capacity = not jaamsim_class or jaamsim_class == "resource"
+        if (
+            resource.get("used_by")
+            and not derived_placeholder
+            and requires_capacity
+            and not has_any_key(params, {"capacity", "capacidade", "units", "quantity", "number"})
+        ):
+            alerts.append(
+                alert(
+                    "RCL23",
+                    "media",
+                    str(resource.get("id") or resource.get("name") or "resource"),
+                    f"O recurso '{resource.get('name', resource.get('id', 'sem_nome'))}' nao declara capacidade.",
+                    "Um recurso real usado sem capacidade documentada impede interpretar gargalos e utilizacao.",
+                    "Declare Capacity para Resource, ou documente o contrato equivalente.",
+                    {"resource": resource},
                 )
+            )
 
     return deduplicate_alerts(alerts)
 
