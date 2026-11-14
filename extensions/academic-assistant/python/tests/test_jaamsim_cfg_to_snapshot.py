@@ -61,10 +61,8 @@ MetricUtilizacaoServidor DataSource { [ServerAtendimento].State }
             ],
             snapshot["connections"],
         )
-        self.assertEqual(
-            [{"id": "capacidade_server_atendimento", "name": "Capacidade de Server Atendimento", "used_by": ["server_atendimento"]}],
-            snapshot["resources"],
-        )
+        # A Server is not an explicitly declared JaamSim Resource.
+        self.assertEqual([], snapshot["resources"])
         self.assertEqual(
             ["Tempo medio de espera", "Clientes atendidos", "Utilizacao do servidor"],
             [item["name"] for item in snapshot["metrics"]],
@@ -100,6 +98,60 @@ Atendimento NextComponent { Saida }
         self.assertIn("RCL13", triggered)
         self.assertIn("RCL26", triggered)
         self.assertNotIn("RCL12", triggered)
+
+
+    def test_declared_resources_use_seize_release_and_pool_references(self):
+        cfg = """RecordEdits
+Define EntityGenerator { SourceA }
+Define EntitySink { SinkA }
+Define Resource { WorkerA WorkerAA WorkerUnused }
+Define ResourcePool { CrewPool }
+Define ResourceUnit { CrewUnit }
+Define Seize { SeizeWorker SeizePool }
+Define Release { ReleaseWorker }
+SourceA NextComponent { SinkA }
+SeizeWorker ResourceList { WorkerA WorkerAA }
+ReleaseWorker Resource { WorkerA }
+SeizePool ResourceList { CrewPool }
+CrewUnit ResourcePool { CrewPool }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "resource-links.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        resources = {item["id"]: item for item in snapshot["resources"]}
+        self.assertEqual(
+            {"worker_a", "worker_aa", "worker_unused", "crew_pool", "crew_unit"},
+            set(resources),
+        )
+        self.assertEqual(["seize_worker", "release_worker"], resources["worker_a"]["used_by"])
+        self.assertEqual(["seize_worker"], resources["worker_aa"]["used_by"])
+        self.assertEqual([], resources["worker_unused"]["used_by"])
+        self.assertEqual(["seize_pool"], resources["crew_pool"]["used_by"])
+        self.assertEqual(["seize_pool"], resources["crew_unit"]["used_by"])
+        self.assertEqual("Resource", resources["worker_a"]["jaamsim_class"])
+        resource_alerts = {
+            item.component_id
+            for item in snapshot_analyzer.analyze_snapshot(snapshot)
+            if item.rule_id == "RCL03"
+        }
+        self.assertEqual({"worker_unused"}, resource_alerts)
+
+    def test_resource_reference_uses_exact_object_name(self):
+        cfg = """RecordEdits
+Define Resource { Worker Worker2 }
+Define Seize { SeizeWorker2 }
+SeizeWorker2 ResourceList { Worker2 }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "resource-exact.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        resources = {item["id"]: item for item in snapshot["resources"]}
+        self.assertEqual([], resources["worker"]["used_by"])
+        self.assertEqual(["seize_worker2"], resources["worker2"]["used_by"])
 
 
 if __name__ == "__main__":
