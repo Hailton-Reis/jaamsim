@@ -308,5 +308,31 @@ SeizePool ResourceList { PoolA }
         self.assertNotIn("RCL23", triggered)
 
 
+    def test_reference_c1_cfg_declares_seconds_and_distribution_correctly(self):
+        cfg = (
+            snapshot_analyzer.ROOT
+            / "examples"
+            / "jaamsim"
+            / "c1_fila_simples_referencia.cfg"
+        )
+        snapshot = converter.convert_cfg_to_snapshot(cfg)
+        self.assertIn(
+            {"id": "iatdistribution", "name": "IATDistribution",
+             "jaamsim_name": "IATDistribution", "type": "ExponentialDistribution",
+             "parameters": {"UnitType": "TimeUnit", "RandomSeed": "1", "Mean": "1 s"}},
+            snapshot["distributions"],
+        )
+        server = next(
+            item for item in snapshot["components"]
+            if item["id"] == "server_atendimento"
+        )
+        self.assertEqual("0.85 s", server["parameters"]["ServiceTime"])
+        temporal_alerts = [
+            item for item in snapshot_analyzer.analyze_snapshot(snapshot)
+            if item.rule_id == "RCL24"
+        ]
+        self.assertEqual([], temporal_alerts)
+
+
 if __name__ == "__main__":
     unittest.main()
