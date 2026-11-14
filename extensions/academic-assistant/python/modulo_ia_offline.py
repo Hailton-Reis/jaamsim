@@ -49,6 +49,8 @@ class OfflineReviewResult:
     local_suggestions: list["LocalSuggestion"]
     allowed_changes: list["AllowedChange"]
     suggestion_audit: list["SuggestionDecisionAudit"]
+    parser_schema_version: str | None
+    parser_warnings: list[dict[str, Any]]
 
 
 @dataclass
@@ -643,6 +645,8 @@ def profile_guidance(suggestion: LocalSuggestion, user_profile: str) -> str:
 def render_offline_markdown(
     analysis: snapshot_analyzer.Analysis,
     *,
+    parser_schema_version: str | None,
+    parser_warnings: list[dict[str, Any]],
     input_file: str,
     input_type: str,
     generated_snapshot_file: str | None,
@@ -711,6 +715,23 @@ def render_offline_markdown(
                 "",
             ]
         )
+
+    lines.extend([
+        "## Diagnosticos do parser CFG",
+        "",
+        f"- Esquema do parser: `{parser_schema_version or 'nao informado'}`",
+        f"- Avisos de leitura: `{len(parser_warnings)}`",
+        "",
+    ])
+    if parser_warnings:
+        lines.append("Atencao: avisos do parser indicam limites de cobertura ou de leitura; nao sao regras RCL.")
+        lines.append("Verifique estes pontos antes de usar o snapshot como evidencia final.")
+        lines.append("")
+        for index, warning in enumerate(parser_warnings, start=1):
+            lines.append(f"- Aviso {index}: `{json.dumps(warning, ensure_ascii=False)}`")
+        lines.append("")
+    else:
+        lines.extend(["Nenhum aviso de leitura do parser registrado.", ""])
 
     lines.extend(["## Sugestoes locais estruturadas", ""])
     if not local_suggestions:
@@ -815,6 +836,8 @@ def write_offline_outputs(
     analysis: snapshot_analyzer.Analysis,
     output_dir: Path,
     *,
+    parser_schema_version: str | None,
+    parser_warnings: list[dict[str, Any]],
     input_file: str,
     input_type: str,
     generated_snapshot_file: str | None,
@@ -843,6 +866,12 @@ def write_offline_outputs(
         },
         "input_file": input_file,
         "input_type": input_type,
+        "parser_diagnostics": {
+            "schema_version": parser_schema_version,
+            "warning_count": len(parser_warnings),
+            "warnings": parser_warnings,
+            "independent_of_rcl": True,
+        },
         "user_profile": user_profile,
         "suggestion_status_file": display_path(suggestions_path),
         "suggestion_decision_audit_file": display_path(audit_path),
@@ -904,6 +933,8 @@ def write_offline_outputs(
     markdown_path.write_text(
         render_offline_markdown(
             analysis,
+            parser_schema_version=parser_schema_version,
+            parser_warnings=parser_warnings,
             input_file=input_file,
             input_type=input_type,
             generated_snapshot_file=generated_snapshot_file,
@@ -966,6 +997,13 @@ def review_input(
     else:
         snapshot_path = input_path
 
+    # Parser warnings must reach the native assistant, not be buried only
+    # in the generated snapshot. Keep them separate from deterministic RCLs.
+    parsed_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8-sig"))
+    parser_schema_version = parsed_snapshot.get("parser_schema_version")
+    raw_warnings = parsed_snapshot.get("parser_warnings", [])
+    parser_warnings = [w for w in raw_warnings if isinstance(w, dict)] if isinstance(raw_warnings, list) else []
+
     analysis = build_analysis_from_snapshot(snapshot_path, expectations, evaluate_expected_rules=use_matrix)
     local_suggestions = build_local_suggestions(analysis)
     status_overrides = load_suggestion_statuses(status_file)
@@ -982,6 +1020,8 @@ def review_input(
     json_path, markdown_path, suggestions_path, change_plan_path, audit_path = write_offline_outputs(
         analysis,
         output_dir,
+        parser_schema_version=parser_schema_version,
+        parser_warnings=parser_warnings,
         input_file=display_path(input_path),
         input_type=detected_type,
         generated_snapshot_file=generated_snapshot_file,
@@ -1023,6 +1063,8 @@ def review_input(
         local_suggestions=local_suggestions,
         allowed_changes=allowed_changes,
         suggestion_audit=suggestion_audit,
+        parser_schema_version=parser_schema_version,
+        parser_warnings=parser_warnings,
     )
 
 
@@ -1189,6 +1231,13 @@ def main() -> None:
             f"{result.analysis.model_id}: {len(result.analysis.alerts)} alertas, "
             f"{len(result.local_suggestions)} sugestoes locais ({rules})"
         )
+        print(f"  Diagnosticos parser: {len(result.parser_warnings)} avisos")
+        if result.parser_warnings:
+            print("  ATENCAO: cobertura parcial de CFG; confira os detalhes no relatorio Markdown.")
+            for warning in result.parser_warnings[:8]:
+                print(f"    - {warning.get('type', 'UNKNOWN')}: {warning.get('object') or warning.get('target') or warning.get('encoding') or 'ver detalhes'}")
+            if len(result.parser_warnings) > 8:
+                print(f"    ... {len(result.parser_warnings) - 8} avisos adicionais no relatorio.")
         print(f"  Markdown: {result.output_markdown_file}")
         print(f"  Status sugestoes: {result.output_suggestions_file}")
         print(f"  Plano de mudancas: {result.output_change_plan_file}")
