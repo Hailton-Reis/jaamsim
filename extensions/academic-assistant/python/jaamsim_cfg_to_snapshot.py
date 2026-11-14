@@ -39,7 +39,8 @@ SNAPSHOT_TYPE_BY_JAAMSIM = {
 }
 PASS_THROUGH_TYPES = {"EntityConveyor"}
 PROCESS_TYPES = {"Server", "EntityProcessor"}
-RESOURCE_TYPES = {"ResourceUnit", "ResourcePool"}
+RESOURCE_TYPES = {"Resource", "ResourceUnit", "ResourcePool"}
+RESOURCE_REFERENCE_KEYWORDS = {"ResourceList", "Resource"}
 DISTRIBUTION_TYPES = {
     "BetaDistribution",
     "DiscreteDistribution",
@@ -237,27 +238,56 @@ def build_distributions(model: CfgModel) -> list[dict[str, Any]]:
 
 
 def build_resources(model: CfgModel, object_ids: dict[str, str]) -> list[dict[str, Any]]:
+    """Track declared JaamSim resources using explicit input references.
+
+    Servers are processors, not implicit resources. A ResourceUnit in a used
+    ResourcePool has potential consumers, but no runtime use is asserted.
+    """
     resources: list[dict[str, Any]] = []
-    used: set[str] = set()
+    resources_by_name: dict[str, dict[str, Any]] = {}
+    used_ids: set[str] = set()
+
     for name, jaamsim_class in model.classes.items():
         if jaamsim_class not in RESOURCE_TYPES:
             continue
-        resource_id = unique_id(to_id(name), used)
-        resources.append({"id": resource_id, "name": humanize(name), "used_by": []})
+        resource = {
+            "id": unique_id(to_id(name), used_ids),
+            "name": humanize(name),
+            "jaamsim_class": jaamsim_class,
+            "used_by": [],
+        }
+        resources.append(resource)
+        resources_by_name[name] = resource
 
-    for name, jaamsim_class in model.classes.items():
-        if jaamsim_class not in PROCESS_TYPES or name not in object_ids:
+    # Seize/Release use ResourceList, with Resource as its keyword alias.
+    # Exact token matches prevent similarly named resources from colliding.
+    for owner_name, inputs in model.inputs.items():
+        if owner_name not in model.classes:
             continue
-        process_id = object_ids[name]
-        resources.append(
-            {
-                "id": f"capacidade_{process_id}",
-                "name": f"Capacidade de {humanize(name)}",
-                "used_by": [process_id],
-            }
-        )
-    return resources
+        owner_id = object_ids.get(owner_name, to_id(owner_name))
+        for keyword, value in inputs.items():
+            if keyword not in RESOURCE_REFERENCE_KEYWORDS:
+                continue
+            for target_name in tokenise(value):
+                resource = resources_by_name.get(target_name)
+                if resource is not None and owner_id not in resource["used_by"]:
+                    resource["used_by"].append(owner_id)
 
+    # ResourcePool membership is declared by ResourceUnit.ResourcePool.
+    for name, resource in resources_by_name.items():
+        if model.classes[name] != "ResourceUnit":
+            continue
+        pool_name = first_token(model.inputs.get(name, {}).get("ResourcePool"))
+        if not pool_name or model.classes.get(pool_name) != "ResourcePool":
+            continue
+        pool = resources_by_name.get(pool_name)
+        if pool is None:
+            continue
+        for consumer in pool["used_by"]:
+            if consumer not in resource["used_by"]:
+                resource["used_by"].append(consumer)
+
+    return resources
 
 def metric_name(object_name: str, inputs: dict[str, str]) -> str:
     if "Format" in inputs:
