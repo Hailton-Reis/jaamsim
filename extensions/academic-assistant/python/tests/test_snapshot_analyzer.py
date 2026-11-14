@@ -105,5 +105,62 @@ class SnapshotAnalyzerTest(unittest.TestCase):
         )
 
 
+    def test_rcl23_requires_capacity_for_real_used_resource_not_pool_or_unit(self):
+        snapshot = {
+            "model_id": "resource_types",
+            "case_id": "RESOURCE",
+            "variant": "synthetic",
+            "title": "Resource semantics",
+            "objective": "Test capacity keyword contract",
+            "components": [],
+            "connections": [],
+            "resources": [
+                {
+                    "id": "worker_missing",
+                    "name": "Worker Missing",
+                    "jaamsim_class": "Resource",
+                    "provenance": "CFG_DECLARED_RESOURCE",
+                    "parameters": {"SomeInput": "x"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "worker_defined",
+                    "name": "Worker Defined",
+                    "jaamsim_class": "Resource",
+                    "parameters": {"Capacity": "3"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "pool",
+                    "name": "Pool",
+                    "jaamsim_class": "ResourcePool",
+                    "parameters": {"Note": "members"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "unit",
+                    "name": "Unit",
+                    "jaamsim_class": "ResourceUnit",
+                    "parameters": {"ResourcePool": "Pool"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "old_placeholder",
+                    "name": "Old Placeholder",
+                    "provenance": "DERIVED_PROCESS_CAPACITY_PLACEHOLDER",
+                    "parameters": {"SomeInput": "historical"},
+                    "used_by": ["server"],
+                },
+            ],
+            "metrics": [],
+            "assumptions": [],
+        }
+        alerts = analyzer.analyze_snapshot(snapshot)
+        missing_capacity_ids = {
+            item.component_id for item in alerts if item.rule_id == "RCL23"
+        }
+        self.assertEqual({"worker_missing"}, missing_capacity_ids)
+
+
 if __name__ == "__main__":
     unittest.main()
