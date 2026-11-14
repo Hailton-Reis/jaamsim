@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -44,6 +45,34 @@ METRIC_KEYWORDS = {
     "utilizacao": ("utilizacao", "utilização", "servidor", "maquina", "máquina"),
     "fila": ("fila", "espera"),
 }
+
+# R001-v6 temporal keyword/value contract. Units belong in values, not
+# component names or combined key/value text. Keep second "s" explicit.
+TIME_KEY_FRAGMENTS = {
+    "time", "duration", "delay", "arrival", "service", "processing",
+    "warmup", "warm_up", "firstarrival", "interarrival", "simtime",
+    "simulation_time", "run_duration", "runduration",
+}
+TIME_UNIT_RE = re.compile(
+    r"(?:^|\s)(?:s|sec|secs|second|seconds|min|mins|minute|minutes|"
+    r"h|hr|hrs|hour|hours|d|day|days)(?:$|\s)",
+    re.IGNORECASE,
+)
+
+
+def temporal_parameter_values(params: dict[str, Any]) -> list[tuple[str, str]]:
+    result: list[tuple[str, str]] = []
+    for key, value in params.items():
+        normalized_key = str(key).casefold().replace("_", "")
+        if any(fragment.replace("_", "") in normalized_key for fragment in TIME_KEY_FRAGMENTS):
+            result.append((str(key), str(value).strip()))
+    return result
+
+
+def normalized_reference(value: Any) -> str:
+    """Compare JaamSim names and normalized snapshot IDs without guessing units."""
+    return re.sub(r"[^a-z0-9]", "", str(value or "").casefold().strip(" '\""))
+
 
 
 @dataclass
@@ -430,9 +459,9 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
     elif isinstance(distributions, list):
         distribution_items = [value for value in distributions if isinstance(value, dict)]
     distribution_references = {
-        str(value).strip().lower()
+        normalized_reference(value)
         for item in distribution_items
-        for value in (item.get("id"), item.get("name"))
+        for value in (item.get("id"), item.get("name"), item.get("jaamsim_name"))
         if value
     }
 
@@ -520,16 +549,16 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
                 )
             )
 
-        references_distribution = any(
-            str(value).strip().lower() in distribution_references for value in params.values()
-        )
-        if component.get("type") in {"process", "queue", "source"} and text_contains(
-            component_text(component),
-            {"tempo", "time", "duration", "service", "processing", "arrival"},
-        ) and not references_distribution and not text_contains(
-            component_text(component),
-            {" min", " h", " hora", "dia", "seg", "second", "minute", "hour"},
-        ):
+        # Validate each temporal parameter independently. A valid "0.85 s"
+        # or an explicit named distribution is not missing a time unit.
+        temporal_values = temporal_parameter_values(params)
+        uncertain_values = [
+            {"parameter": key, "value": value}
+            for key, value in temporal_values
+            if not TIME_UNIT_RE.search(f" {value} ")
+            and normalized_reference(value) not in distribution_references
+        ]
+        if component.get("type") in {"process", "queue", "source"} and uncertain_values:
             alerts.append(
                 alert(
                     "RCL24",
@@ -537,8 +566,8 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
                     cid,
                     f"O componente '{component['name']}' usa parametro temporal sem unidade evidente.",
                     "Unidades implicitas podem gerar erro de escala entre ProModel, JaamSim e relatorio.",
-                    "Documente minutos, horas, dias ou segundos em cada parametro temporal.",
-                    {"text": component_text(component)[:500]},
+                    "Documente segundos, minutos, horas ou dias, ou uma distribuicao nomeada verificavel.",
+                    {"temporal_parameters_without_evident_unit": uncertain_values},
                 )
             )
 
