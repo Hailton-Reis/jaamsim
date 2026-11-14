@@ -670,7 +670,12 @@ def analyze_snapshot(snapshot: dict[str, Any]) -> list[Alert]:
         derived_placeholder = provenance == "DERIVED_PROCESS_CAPACITY_PLACEHOLDER"
         # Capacity is a keyword of Resource. ResourcePool derives capacity
         # from member units; ResourceUnit is normally a single resource.
-        requires_capacity = not jaamsim_class or jaamsim_class == "resource"
+        # Historical snapshots without JaamSim class/inputs have an unspecified
+        # resource contract; do not turn missing metadata into a false positive.
+        has_parameter_contract = bool(resource.get("parameters") or resource.get("inputs"))
+        requires_capacity = jaamsim_class == "resource" or (
+            not jaamsim_class and has_parameter_contract
+        )
         if (
             resource.get("used_by")
             and not derived_placeholder
