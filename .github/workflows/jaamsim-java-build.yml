@@ -9,6 +9,7 @@ on:
       - "build.xml"
       - "scripts/build.sh"
       - "scripts/package_native_candidate.py"
+      - "RODAR_JAAM_AI_COMPLETO.cmd"
       - ".github/workflows/jaamsim-java-build.yml"
   workflow_dispatch:
 
