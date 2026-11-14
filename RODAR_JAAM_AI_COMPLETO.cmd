@@ -1,7 +1,12 @@
 @echo off
 setlocal EnableExtensions DisableDelayedExpansion
 chcp 65001 >nul 2>nul
-for %%I in ("%~dp0.") do set "JAAM_ROOT=%%~fI"
+pushd "%~dp0" >nul 2>nul
+if errorlevel 1 (
+    echo [ERRO] Pasta principal JAAM-AI inacessivel.
+    exit /b 10
+)
+set "JAAM_ROOT=%CD%"
 set "JAAM_JAR=%JAAM_ROOT%\JaamSim2026-03.jar"
 set "JAAM_REVIEW=%JAAM_ROOT%\extensions\academic-assistant\python\modulo_ia_offline.py"
 set "JAAM_OUTPUT=%JAAM_ROOT%\extensions\academic-assistant\output\offline-review"
