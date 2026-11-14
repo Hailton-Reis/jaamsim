@@ -154,5 +154,159 @@ SeizeWorker2 ResourceList { Worker2 }
         self.assertEqual(["seize_worker2"], resources["worker2"]["used_by"])
 
 
+    def test_multiline_cp1252_quoted_names_and_resource_capacity(self):
+        cfg = """RecordEdits
+# Premissa: Atendimento com referência explícita à equipe.
+Define EntityGenerator { 'Gerador Principal' }
+Define Queue {
+    'Fila de Espera'
+}
+Define Seize { 'Seize Worker' }
+Define EntitySink { 'Saida Final' }
+Define Resource { Worker1 }
+'Gerador Principal' NextComponent {
+    'Fila de Espera'
+}
+'Seize Worker' WaitQueue { 'Fila de Espera' }
+'Seize Worker' NextComponent { 'Saida Final' }
+'Seize Worker' ResourceList { Worker1 }
+Worker1 Capacity { 2 }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multiline_quoted.cfg"
+            path.write_bytes(cfg.encode("cp1252"))
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        self.assertEqual("R001-v6-bridge", snapshot["parser_schema_version"])
+        self.assertEqual(4, len(snapshot["components"]))
+        self.assertEqual(
+            [
+                {"from": "gerador_principal", "to": "fila_de_espera", "type": "entity_flow"},
+                {"from": "fila_de_espera", "to": "seize_worker", "type": "entity_flow"},
+                {"from": "seize_worker", "to": "saida_final", "type": "entity_flow"},
+            ],
+            snapshot["connections"],
+        )
+        self.assertEqual(["Atendimento com referência explícita à equipe."], snapshot["assumptions"])
+        resource = snapshot["resources"][0]
+        self.assertEqual(["seize_worker"], resource["used_by"])
+        self.assertEqual({"Capacity": "2"}, resource["parameters"])
+        self.assertEqual("CFG_DECLARED_RESOURCE", resource["provenance"])
+        self.assertNotIn(
+            "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET",
+            [w["type"] for w in snapshot["parser_warnings"]],
+        )
+        self.assertIn(
+            "SOURCE_ENCODING_FALLBACK",
+            [w["type"] for w in snapshot["parser_warnings"]],
+        )
+        rules = {a.rule_id for a in snapshot_analyzer.analyze_snapshot(snapshot)}
+        self.assertNotIn("RCL04", rules)
+        self.assertNotIn("RCL23", rules)
+
+    def test_utf8_bom_and_metric_lineage(self):
+        cfg = """RecordEdits
+Define Queue { QueueA }
+Define Text { 'Metric Queue' }
+'Metric Queue' Format { 'Tempo medio = %.2f s' }
+'Metric Queue' DataSource { [QueueA].AverageQueueTime }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metric.cfg"
+            path.write_text(cfg, encoding="utf-8-sig")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        self.assertEqual([], snapshot["parser_warnings"])
+        self.assertEqual(1, len(snapshot["metrics"]))
+        metric = snapshot["metrics"][0]
+        self.assertEqual("metric_metric_queue", metric["id"])
+        self.assertEqual("queue_a", metric["target"])
+        self.assertEqual("[QueueA].AverageQueueTime", metric["data_source"])
+        self.assertEqual("Metric Queue", metric["source_object"])
+        self.assertEqual("Text", metric["source_class"])
+        self.assertTrue(metric["requires_data_source"])
+        self.assertEqual("CFG_DATASOURCE", metric["provenance"])
+
+    def test_unparsed_statements_and_unresolved_links_are_reported(self):
+        cfg = """RecordEdits
+Define EntityGenerator { Generator }
+Define Mystery { Secret }
+Generator NextComponent { Secret }
+Broken invalid input
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "unknown.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        warnings = snapshot["parser_warnings"]
+        self.assertEqual(
+            {"UNPARSED_STATEMENT", "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET"},
+            {item["type"] for item in warnings},
+        )
+        self.assertEqual([], snapshot["connections"])
+        link = next(item for item in warnings if item["type"] == "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET")
+        self.assertEqual("Secret", link["target"])
+        self.assertEqual("Mystery", link["target_class"])
+
+    def test_duplicate_edges_and_custom_submodel_partial_warning(self):
+        cfg = """RecordEdits
+Define SubModel { Workstation }
+Define Workstation { Workstation1 }
+Define EntityGenerator { Source }
+Define Duplicate { Split }
+Define EntitySink { Sink1 Sink2 }
+Source NextComponent { Split }
+Split NextComponent { Sink1 }
+Split TargetComponentList { Workstation1 Sink2 }
+Workstation1 NextComponent { Sink2 }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "duplicate_submodel.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        comps = {c["id"]: c for c in snapshot["components"]}
+        self.assertEqual("operation", comps["split"]["type"])
+        self.assertEqual("operation", comps["workstation1"]["type"])
+        self.assertEqual("CUSTOM_SUBMODEL_INSTANCE", comps["workstation1"]["provenance"])
+        self.assertEqual("SUBMODEL_SUMMARY_ONLY", comps["workstation1"]["semantic_scope"])
+        self.assertIn(
+            {"from": "split", "to": "workstation1", "type": "duplicate_flow"},
+            snapshot["connections"],
+        )
+        self.assertIn(
+            {"from": "split", "to": "sink2", "type": "duplicate_flow"},
+            snapshot["connections"],
+        )
+        self.assertEqual(
+            {"Workstation", "Workstation1"},
+            {w["object"] for w in snapshot["parser_warnings"] if w["type"] == "SUBMODEL_SEMANTICS_PARTIAL"},
+        )
+        self.assertFalse(
+            any(w["type"] == "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET" for w in snapshot["parser_warnings"])
+        )
+
+    def test_resource_pool_with_unit_does_not_require_artificial_capacity(self):
+        cfg = """RecordEdits
+Define ResourcePool { PoolA }
+Define ResourceUnit { UnitA }
+Define Seize { SeizePool }
+UnitA ResourcePool { PoolA }
+SeizePool ResourceList { PoolA }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pool.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        resources = {r["id"]: r for r in snapshot["resources"]}
+        self.assertEqual(["seize_pool"], resources["unit_a"]["used_by"])
+        self.assertEqual({"ResourcePool": "PoolA"}, resources["unit_a"]["parameters"])
+        triggered = {a.rule_id for a in snapshot_analyzer.analyze_snapshot(snapshot)}
+        self.assertNotIn("RCL03", triggered)
+        self.assertNotIn("RCL23", triggered)
+
+
 if __name__ == "__main__":
     unittest.main()
