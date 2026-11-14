@@ -182,7 +182,14 @@ def parse_cfg(path: Path) -> CfgModel:
         if input_match:
             object_name, keyword, body = input_match.groups()
             object_name = clean_braced_value(object_name)
-            model.inputs.setdefault(object_name, {})[keyword] = clean_braced_value(body.strip())
+            # Quoted names must stay quoted until reference tokenisation.
+            # Without this, 'Fila de Espera' would turn into only 'Fila'.
+            reference_keywords = {
+                "NextComponent", "WaitQueue", "NextComponentList",
+                "TargetComponentList", "ResourceList", "Resource", "ResourcePool",
+            }
+            stored_body = body.strip() if keyword in reference_keywords else clean_braced_value(body.strip())
+            model.inputs.setdefault(object_name, {})[keyword] = stored_body
             if object_name == "Simulation" and keyword == "Description":
                 model.description = clean_braced_value(body.strip())
             continue
