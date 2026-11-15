@@ -2271,13 +2271,11 @@ public class AIAssistantBox extends FrameBox {
 							String input = getStringChild(statusJson, "input_file", "");
 							if (input.isEmpty())
 								continue;
-							// Python shortens paths inside the repository relative to its root.
-							Path statusSource = Paths.get(input);
-							if (!statusSource.isAbsolute()) {
-								Path repositoryRoot = reportRoot.getParent().getParent().getParent().getParent();
-								statusSource = repositoryRoot.resolve(statusSource);
-							}
-							if (!source.equals(statusSource.toAbsolutePath().normalize()))
+							// Python display_path() uses assistant_paths.ASSISTANT_ROOT,
+							// not JAAM_AI_NATIVE or the process working directory.
+							Path assistantRootForStatus = reportRoot.getParent().getParent();
+							Path statusSource = resolveReportedSource(input, assistantRootForStatus);
+							if (!source.equals(statusSource))
 								continue;
 							FileTime modified = Files.getLastModifiedTime(file);
 							if (newest == null || modified.compareTo(newestTime) > 0) {
@@ -2360,9 +2358,10 @@ public class AIAssistantBox extends FrameBox {
 			return null;
 		Path recorded = Paths.get(raw);
 		if (!recorded.isAbsolute()) {
-			// Python records paths relative to the JaamSim repository root.
-			Path repositoryRoot = assistantRoot.getParent().getParent();
-			recorded = repositoryRoot.resolve(recorded);
+			// modulo_ia_offline.display_path() relativizes to
+			// snapshot_analyzer.ROOT == assistant_paths.ASSISTANT_ROOT.
+			// The CMD and Java must resolve against this same directory.
+			recorded = assistantRoot.resolve(recorded);
 		}
 		return recorded.toAbsolutePath().normalize();
 	}
