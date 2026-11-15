@@ -8,6 +8,7 @@
 package com.jaamsim.ui;
 
 import java.lang.reflect.Method;
+import java.io.File;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
@@ -81,6 +82,28 @@ public final class OfflineRclReportContractTest {
 		if ((found != null) != expected)
 			throw new AssertionError(context + ": expected reuse=" + expected + ", found=" + found);
 		checks++;
+	}
+
+	private static void expectRoot(Class<?> window, File model, Path configuredRoot,
+			Path expectedRoot, String reason) throws Exception {
+		Method lookup = window.getDeclaredMethod("findAssistantRoot", File.class);
+		lookup.setAccessible(true);
+		String previous = System.getProperty("jaamsim.assistant.root");
+		try {
+			System.setProperty("jaamsim.assistant.root", configuredRoot.toString());
+			Path found = (Path) lookup.invoke(null, model);
+			if (expectedRoot == null ? found != null : !expectedRoot.equals(found)) {
+				throw new AssertionError(window.getSimpleName() + " / " + reason
+						+ ": expected=" + expectedRoot + ", actual=" + found);
+			}
+			checks++;
+		}
+		finally {
+			if (previous == null)
+				System.clearProperty("jaamsim.assistant.root");
+			else
+				System.setProperty("jaamsim.assistant.root", previous);
+		}
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -182,6 +205,37 @@ public final class OfflineRclReportContractTest {
 				.replace(absolute, escape(relative.toString())));
 		Files.delete(receiptFile);
 		expectHistoricalStatus(lookup, historyRoot, cfg, false, "unattested history");
+		// Both native windows must treat an explicit root as authoritative.
+		// The CFG is deliberately next to an alternate valid module: silent
+		// fallback would find it and incorrectly accept the invalid setting.
+		Path python = assistantRoot.resolve("python");
+		Files.createDirectories(python);
+		Files.writeString(python.resolve("modulo_ia_offline.py"), "# placeholder");
+		Files.writeString(python.resolve("statfit_auxiliar.py"), "# placeholder");
+		Path missing = temp.resolve("missing-extension-root");
+		expectRoot(AIAssistantBox.class, cfg.toFile(), missing, null,
+				"invalid explicit root must not fall back to CFG directory");
+		expectRoot(StatFitAssistantBox.class, cfg.toFile(), missing, null,
+				"invalid explicit root must not fall back to CFG directory");
+		expectRoot(AIAssistantBox.class, cfg.toFile(), assistantRoot, assistantRoot,
+				"configured direct extension root");
+		expectRoot(StatFitAssistantBox.class, cfg.toFile(), assistantRoot, assistantRoot,
+				"configured direct extension root");
+		expectRoot(AIAssistantBox.class, cfg.toFile(), repositoryRoot, assistantRoot,
+				"configured native root with nested extension");
+		expectRoot(StatFitAssistantBox.class, cfg.toFile(), repositoryRoot, assistantRoot,
+				"configured native root with nested extension");
+		// A directory with only the other window's script is not sufficient.
+		Path wrongScript = temp.resolve("wrong-script-extension");
+		Files.createDirectories(wrongScript.resolve("python"));
+		Files.writeString(wrongScript.resolve("python").resolve("statfit_auxiliar.py"), "# placeholder");
+		expectRoot(AIAssistantBox.class, cfg.toFile(), wrongScript, null,
+				"explicit root missing AI script");
+		Files.delete(wrongScript.resolve("python").resolve("statfit_auxiliar.py"));
+		Files.writeString(wrongScript.resolve("python").resolve("modulo_ia_offline.py"), "# placeholder");
+		expectRoot(StatFitAssistantBox.class, cfg.toFile(), wrongScript, null,
+				"explicit root missing StatFit script");
+
 		System.out.println("RCL_REPORT_PROVENANCE_CONTRACT_OK " + checks);
 	}
 }
