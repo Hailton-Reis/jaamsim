@@ -2094,7 +2094,15 @@ public class AIAssistantBox extends FrameBox {
 						try {
 							JSONValue statusJson = readJsonFile(file);
 							String input = getStringChild(statusJson, "input_file", "");
-							if (input.isEmpty() || !source.equals(Paths.get(input).toAbsolutePath().normalize()))
+							if (input.isEmpty())
+								continue;
+							// Python shortens paths inside the repository relative to its root.
+							Path statusSource = Paths.get(input);
+							if (!statusSource.isAbsolute()) {
+								Path repositoryRoot = reportRoot.getParent().getParent().getParent().getParent();
+								statusSource = repositoryRoot.resolve(statusSource);
+							}
+							if (!source.equals(statusSource.toAbsolutePath().normalize()))
 								continue;
 							FileTime modified = Files.getLastModifiedTime(file);
 							if (newest == null || modified.compareTo(newestTime) > 0) {
