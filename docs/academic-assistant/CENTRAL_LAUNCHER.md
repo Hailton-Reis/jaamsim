@@ -134,3 +134,66 @@ e um registro local auditavel por seu conteudo. Nenhuma GUI, CMD,
 Python de revisao ou experimento foi executado como teste manual nesta
 etapa. O atalho e o CMD ativo do Windows/Drive nao foram modificados.
 **P004 DENY / Full45 NO-GO; PR em rascunho.**
+
+
+## v0.56 — historico unificado entre CMD e Assistente IA nativo
+
+**Estado:** `CANDIDATE_ONLY`, nao instalado no Windows nem no arquivo
+ativo do Google Drive. **O atalho continua apontando para o MESMO**
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, com o menu 1-11.
+
+No GitHub publico, a classe
+`src/main/java/com/jaamsim/ui/AIAssistantBox.java` foi atualizada
+para gravar revisoes RCL na mesma raiz usada pela opcao **9** do CMD:
+
+`JAAM_AI_NATIVE/extensions/academic-assistant/output/offline-review/`
+
+- **CMD:** cada revisao continua em uma subpasta com `run_id` historico.
+- **Janela IA do JaamSim:** nova subpasta `gui_<timestamp_utc>_<id_aleatorio>`
+  para cada execucao, com arquivo
+  `JAAM_AI_OFFLINE_REVIEW_RECEIPT.json`, SHA-256 do CFG original
+  antes/depois, origem `JAAMSIM_GUI_RCL`, resultado de processo e
+  flags negativas de autoedicao, IA externa, P004 e Full45.
+- **Reutilizacao de decisoes:** o assistente le arquivos
+  `*_suggestions_status.json` apenas quando o recibo foi concluido,
+  o `source_cfg` indica **o mesmo caminho absoluto**, o
+  `cfg_sha256_after` coincide com o conteudo atual, o CFG esta
+  marcado como inalterado e a origem do status corresponde ao mesmo
+  arquivo. Entradas antigas `native_rcl` sem recibo confiavel nao
+  sao importadas automaticamente.
+- **Sucesso rigoroso:** a janela so informa `OFFLINE_CONCLUIDA`
+  se o processo retornou 0, o JSON esperado foi encontrado, o
+  hash do CFG permaneceu igual e o recibo de auditoria foi salvo.
+  Erros de Python, limite de tempo ou divergencia de hash sao
+  reportados sem apagar nem restaurar o modelo automaticamente.
+- **Opcao 10:** abre a raiz comum de todos os relatorios.
+- **Opcao 11:** mostra ultimo recibo local existente em modo
+  somente leitura; nao altera o status de nenhuma sugestao.
+
+O JAR Java do modulo foi recompilado pelo
+[GitHub Actions](https://github.com/Hailton-Reis/jaamsim/actions/runs/43666001110),
+e as regressoes Python permaneceram aprovadas no
+[pipeline](https://github.com/Hailton-Reis/jaamsim/actions/runs/43666001141).
+Isso **nao representa teste GUI ou aceite operacional**.
+
+### Identificacao e cadeia de integridade da candidata privada
+
+- CMD candidato v0.55 (origem): SHA-256
+  `a833c9876cde2960d342d818104190c400e4bfdfef020c1bf19ab2b296b37421`.
+- CMD candidato **v0.56**: SHA-256
+  `48075f86794e02a477bf31aee0c06175590598b4b55f2db4f1d283ec37b82f16`,
+  **2.145.083 bytes**.
+- Manifesto `JAAM_AI_NATIVE/MANIFEST_SHA256.json`: SHA-256
+  `518819bfef9cf55aec3591936028d98a49a4072b95eb876f1bb55cace6fa7b1b`;
+  **37 arquivos** conferidos.
+- ZIP privado `JAAM_AI_V056_CMD_ORIGINAL_HISTORICO_RCL_UNIFICADO_2026-11-14.zip`:
+  **60 entradas**, SHA-256
+  `d5470e1f3d0f4ca943e85377568c896d03f945941b1e9e288c1e36bdd074bf0f`.
+- Backups v0.50-v0.55 inteiros e sem modificacao de SHA;
+  blocos historicos de payload embutido do CMD mantidos byte a byte.
+
+Os recibos sao **metadados locais e nao assinaturas digitais**.
+Os hashes protegem verificacao de conteudo, mas nao comprovam
+correcao conceitual de um modelo ou execucao valida do simulador.
+Nenhum teste manual de Windows, GUI, P004 ou Full45 foi executado.
+O CMD ativo no Drive/Windows nao foi substituido; PR continua draft.
