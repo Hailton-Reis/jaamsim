@@ -52,10 +52,11 @@ alteração de bytes ou configure `JAAM_LEGACY_DIR` apontando à sua pasta.
 | 3 | Revisar CFG | Chama Python offline e escreve apenas os relatórios em `output/offline-review` |
 | 4 | Abrir relatórios | Abre somente uma pasta já existente |
 | 5 | MC-001 v0.50 | Só delega ao histórico após hash, sidecar e manifesto verificados |
+| 6 | Compilar JaamSim | Apenas no checkout de código, com JDK 25 e Ant, sem executar GUI ou testes |
 | 0 | Sair | Não encerra servidores alheios |
 
 Também há parâmetros para integração futura: `--help`, `--status`,
-`--jaamsim`, `--review "arquivo.cfg"`, `--reports`, `--mc001`.
+`--jaamsim`, `--review "arquivo.cfg"`, `--reports`, `--mc001`, `--build`.
 Nenhuma dessas operações é chamada automaticamente durante a abertura
 padrão; usar parâmetros que iniciam programas exige uma ação deliberada.
 
