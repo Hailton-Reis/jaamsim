@@ -334,5 +334,76 @@ Gen NextComponent { Missing }
         self.assertEqual(0, report["parser_diagnostics"]["warning_count"])
 
 
+    def test_strict_transfer_reuses_only_exact_same_suggestion_identity(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_inconsistente.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initial = offline.review_input(snapshot, root / "first")
+            old_status = Path(initial.output_suggestions_file)
+            payload = json.loads(old_status.read_text(encoding="utf-8"))
+            payload["suggestions"][0]["status"] = "accepted"
+            payload["suggestions"][0]["status_actor"] = "operador"
+            payload["suggestions"][1]["status"] = "rejected"
+            old_status.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            result = offline.review_input(
+                snapshot, root / "second",
+                status_file=old_status, strict_status_identity=True,
+            )
+            report = json.loads(Path(result.output_json_file).read_text(encoding="utf-8"))
+            md = Path(result.output_markdown_file).read_text(encoding="utf-8")
+
+        self.assertEqual(["accepted", "rejected"], [s.status for s in result.local_suggestions[:2]])
+        self.assertEqual(4, result.status_transfer["imported"])
+        self.assertEqual([], result.status_transfer["rejected"])
+        self.assertTrue(report["status_transfer"]["strict_identity_required"])
+        self.assertIn("Decisoes importadas: 4", md)
+        self.assertEqual("status_file", result.suggestion_audit[0].status_source)
+
+    def test_strict_transfer_blocks_stale_or_incomplete_suggestion_ids(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_inconsistente.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initial = offline.review_input(snapshot, root / "first")
+            old_status = Path(initial.output_suggestions_file)
+            payload = json.loads(old_status.read_text(encoding="utf-8"))
+            payload["suggestions"][0]["status"] = "accepted"
+            payload["suggestions"][0]["rule_id"] = "RCL999"
+            payload["suggestions"][1]["status"] = "accepted"
+            payload["suggestions"][1]["suggested_change"] = "outro texto"
+            payload["suggestions"][2]["status"] = "rejected"
+            payload["suggestions"][2].pop("action_type")
+            payload["suggestions"][3]["status"] = "accepted"
+            old_status.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            result = offline.review_input(
+                snapshot, root / "second",
+                status_file=old_status, strict_status_identity=True,
+            )
+            report = json.loads(Path(result.output_json_file).read_text(encoding="utf-8"))
+
+        self.assertEqual(["pending", "pending", "pending", "accepted"],
+                         [s.status for s in result.local_suggestions])
+        self.assertEqual(1, report["status_transfer"]["imported"])
+        self.assertEqual(3, len(report["status_transfer"]["rejected"]))
+        self.assertEqual("generated_default", result.suggestion_audit[0].status_source)
+        self.assertEqual("status_file", result.suggestion_audit[3].status_source)
+
+    def test_strict_transfer_rejects_legacy_id_only_status_map(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_inconsistente.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            statuses = root / "status.json"
+            statuses.write_text(json.dumps({"suggestions": {"SUG001": "accepted"}}), encoding="utf-8")
+            strict = offline.review_input(
+                snapshot, root / "strict", status_file=statuses,
+                strict_status_identity=True,
+            )
+            legacy = offline.review_input(snapshot, root / "legacy", status_file=statuses)
+
+        self.assertEqual("pending", strict.local_suggestions[0].status)
+        self.assertEqual("accepted", legacy.local_suggestions[0].status)
+        self.assertEqual(1, len(strict.status_transfer["rejected"]))
+        self.assertFalse(legacy.status_transfer["strict_identity_required"])
+
+
 if __name__ == "__main__":
     unittest.main()
