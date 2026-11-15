@@ -3004,6 +3004,8 @@ public class AIAssistantBox extends FrameBox {
 		if (statusFile != null && Files.isRegularFile(statusFile)) {
 			command.add("--status-file");
 			command.add(statusFile.toString());
+			// The file hash alone does not freeze suggestion ordering across RCL versions.
+			command.add("--strict-status-identity");
 		}
 		return command;
 	}
