@@ -326,3 +326,68 @@ ordinal como prova suficiente de identidade de regra.
 **Não executado:** CMD no Windows, GUI, simulação, instalação, uso do atalho,
 inferência P004, Full45 ou merge. A versão ativa do Drive/Windows segue
 intacta; tudo é candidata de engenharia até aceite.
+
+## v0.59 — validação de conteúdo e integridade dos relatórios RCL
+
+**Estado:** candidata de desenvolvimento, não instalada, 15/11/2026.
+O ponto de entrada Windows continua sendo **o mesmo CMD original**
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`; não foi criado outro
+launcher, nem modificado o atalho. Menus 1–11 e barreiras P004/Full45
+permanecem intactos.
+
+### Falha de confiabilidade corrigida
+
+Na versão anterior, a janela do JaamSim considerava suficiente para
+`OFFLINE_CONCLUIDA` que o Python retornasse código 0, o CFG não
+mudasse de SHA-256 e houvesse um arquivo chamado `*_offline_review.json`.
+Isso não comprovava que seu **conteúdo** era válido ou que correspondia
+ao modelo aberto.
+
+A v0.59 passa a exigir conteúdo verificável para registrar conclusão:
+- JSON legível, `mode=offline_deterministico` e `input_type=cfg`;
+- `input_file` compatível com o caminho absoluto do CFG efetivamente
+  revisado, tratando também o formato relativo emitido pelo Python;
+- `analysis.model_id` esperado pelo solicitante;
+- confirmação explícita `false` para `internet_api`, `llm_online`,
+  `local_ai` e `llm_online_assist.enabled`;
+- arquivo de status adjacente, pertencente ao mesmo modelo e CFG,
+  com lista de sugestões legível;
+- hash SHA-256 do JSON no recibo `report_sha256`, além dos hashes
+  do CFG de entrada antes e depois.
+
+A interface Java exige essas condições ao declarar sucesso e ao
+recuperar decisões de histórico; um recibo da interface com hash
+ausente ou divergente não permite transferir decisões. Recibos
+antigos do CMD que ainda não fixavam hash exigem validação do conteúdo
+mas seguem compatíveis para leitura, sem alegar assinatura digital.
+
+A **opção 9 do CMD original** também confere o JSON e seu status antes
+de marcar `COMPLETE_OFFLINE`; em qualquer divergência, registra
+`FAILED_OR_BLOCKED` e código de erro, sem editar nem restaurar o CFG.
+
+### Evidências técnicas
+
+Foi acrescentado `src/test/java/com/jaamsim/ui/OfflineRclReportContractTest.java`
+e uma etapa no CI Java para validar a regra **sem abrir janelas, executar
+simulação, nem iniciar Python**. Foram aprovados **11 casos de contrato**
+de origem, JSON inválido, modelo errado, flags de IA, status inexistente,
+entre outros:
+[CI Java JDK 25 + contrato](https://github.com/Hailton-Reis/jaamsim/actions/runs/43771380475).
+A matriz de regressão Python permanece aprovada:
+[CI Python](https://github.com/Hailton-Reis/jaamsim/actions/runs/43771380416).
+
+**Pacote privado da v0.59**, produzido sem redistribuir o corpus oficial:
+`JAAM_AI_V059_CMD_ORIGINAL_RELATORIO_RCL_VERIFICADO_2026-11-15.zip`.
+
+| Item | SHA-256 / verificação |
+|---|---|
+| CMD principal v0.59 | `05436258482e267df17bba607c56abc26f073af74e4b8c49c604a9a1f7d98e4b`, 2.147.470 bytes |
+| Manifesto do módulo `JAAM_AI_NATIVE` | `ba4186e552ac563e489574ffa5e6e30e418cd43f90f409758ff32d4b833ebbf2` |
+| ZIP privado | `ed702066a0a0d2ed690b62f75e9853bcdbd193997498d9790028213abdd307fb`, 71 entradas |
+| Códigos/recursos nativos | **37/37** arquivos conferidos por SHA-256 e tamanho |
+| Backups | v0.50–v0.58 preservados por hash |
+
+O pacote é uma **candidata estática**; a compilação e os testes
+automatizados não comprovam operação gráfica nem aceitação no Windows.
+Nenhum arquivo ativo do Drive/Windows foi substituído. **Não iniciar
+P004, Full45, inferência, simulação experimental ou merge sem aprovação.**
