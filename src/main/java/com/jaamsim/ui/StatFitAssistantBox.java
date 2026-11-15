@@ -2015,10 +2015,19 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private static Path findAssistantRoot(File dataFile) {
-		ArrayList<Path> candidates = new ArrayList<>();
-		addConfiguredCandidate(candidates, System.getProperty("jaamsim.assistant.root"));
-		addConfiguredCandidate(candidates, System.getenv("JAAMSIM_ASSISTANT_ROOT"));
+		// An explicitly configured extension is authoritative. If missing,
+		// never silently execute another Python module found near the CFG or
+		// in the JVM working directory. This applies equally to GUI and StatFit.
+		String propertyRoot = System.getProperty("jaamsim.assistant.root");
+		if (propertyRoot != null && !propertyRoot.trim().isEmpty())
+			return resolveAssistantRootCandidate(Paths.get(propertyRoot.trim()), "statfit_auxiliar.py");
 
+		String environmentRoot = System.getenv("JAAMSIM_ASSISTANT_ROOT");
+		if (environmentRoot != null && !environmentRoot.trim().isEmpty())
+			return resolveAssistantRootCandidate(Paths.get(environmentRoot.trim()), "statfit_auxiliar.py");
+
+		// Legacy discovery is allowed only when neither source configured a root.
+		ArrayList<Path> candidates = new ArrayList<>();
 		Path currentDir = Paths.get("").toAbsolutePath();
 		candidates.add(currentDir);
 
