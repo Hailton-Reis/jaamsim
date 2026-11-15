@@ -456,3 +456,71 @@ histórico no Windows, alteração do arquivo ativo em Google Drive,
 instalação ou mesclagem deste PR. Os recibos são registros locais,
 não assinaturas digitais. O estado segue `CANDIDATE_ONLY /
 GUI_PENDING / P004_DENY / FULL45_NO_GO`.
+
+
+## v0.61 — raiz do módulo configurado obrigatória (15/11/2026)
+
+O ponto de entrada Windows **continua sendo o mesmo**
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`. Esta candidata
+privada não altera o atalho, o CMD instalado, o menu 1–11 ou as
+restrições P004/Full45.
+
+### Correção de confiança no módulo
+
+Nas versões anteriores, `AIAssistantBox.findAssistantRoot` e
+`StatFitAssistantBox.findAssistantRoot` procuravam, por ordem:
+a propriedade Java `jaamsim.assistant.root`, a variável de ambiente
+`JAAMSIM_ASSISTANT_ROOT`, o diretório corrente e os diretórios
+ancestrais do arquivo de entrada. Se uma raiz explicitamente configurada
+estivesse errada ou não tivesse o script necessário, o código podia
+localizar outro script numa pasta próxima — **diferente do módulo
+verificado por SHA-256 pelo CMD**.
+
+As duas classes foram corrigidas para respeitar a seguinte precedência:
+
+1. Se `jaamsim.assistant.root` estiver definida, **somente essa raiz**
+   pode ser usada; na ausência do script necessário, retorna `null`.
+2. Caso contrário, se `JAAMSIM_ASSISTANT_ROOT` estiver definida,
+   **somente essa raiz** pode ser usada; não há busca implícita posterior.
+3. Somente quando **nenhuma raiz explícita** foi definida, permanece
+   a descoberta por diretório corrente e caminho do arquivo, por
+   compatibilidade com execuções independentes do CMD.
+
+`AIAssistantBox` exige `modulo_ia_offline.py`; `StatFitAssistantBox`
+exige `statfit_auxiliar.py`. Uma raiz inválida impede a operação,
+não dispara fallback nem executa Python. Isso evita usar
+silenciosamente um módulo não correspondente ao manifesto fixado
+pelo controlador, mas **não constitui assinatura do código Python
+em execução nem teste de segurança do Windows**.
+
+### Evidência e candidata privada
+
+- Commits: `bf23c3f7` (Assistente IA), `4cafbb67` (StatFit),
+  `755e7775` (oito regressões adicionais).
+- [Compilação Java JDK25 e 27 verificações de contrato headless](https://github.com/Hailton-Reis/jaamsim/actions/runs/43774641961):
+  **SUCCESS**.
+- [Python 95 testes e 6 subtestes nas 4 combinações Windows/Linux
+  × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43774641997):
+  **SUCCESS**.
+- Módulo `JAAM_AI_NATIVE/`: **37/37 arquivos verificados**
+  por SHA-256 e tamanho. Manifesto:
+  `9dce55fcf99282aa34999eb57acd1f451de35d3977b3aec7ec9c18018ee0583b`.
+- CMD candidato v0.61: 2.147.579 bytes,
+  SHA-256 `83237ac3a6fe045d4188961dea301e8925e3e431834117f7f0e618f30e238a07`.
+- Pacote privado
+  `JAAM_AI_V061_CMD_PRINCIPAL_RAIZ_IA_STATFIT_PROTEGIDA_2026-11-15.zip`:
+  **77 entradas**, SHA-256
+  `1a56042af6f5a67397b09b7d56e04e4d18deec4dec2e40b82afe6b3df95e5f1f`.
+- **11 backups íntegros**, da v0.50 até a v0.60, com CMD,
+  sidecar e manifesto históricos validados.
+- O diff byte a byte da v0.60 para v0.61 tem apenas mudanças do
+  número da versão, manifesto e hash fixado do módulo atualizado;
+  o conteúdo funcional do CMD (incluindo o legado MC-001) é o mesmo.
+- Auditoria estática:
+  `JAAM_AI_V061_STATIC_REPORT_2026-11-15.json`;
+  comparação do CMD:
+  `JAAM_AI_V061_DIFF_CMD_V060_V061.patch`.
+
+**Estado:** CANDIDATE_ONLY / GUI_PENDING / P004_DENY /
+FULL45_NO_GO. Não foi instalado sobre a v0.50 ativa,
+não foi executado manualmente no Windows e o PR continua draft.
