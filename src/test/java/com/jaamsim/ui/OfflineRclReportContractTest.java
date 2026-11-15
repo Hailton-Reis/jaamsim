@@ -61,8 +61,8 @@ public final class OfflineRclReportContractTest {
 		Path temp = Files.createTempDirectory("jaam-rcl-contract-");
 		Path repositoryRoot = temp.resolve("JAAM_AI_NATIVE");
 		Path assistantRoot = repositoryRoot.resolve("extensions").resolve("academic-assistant");
-		Path cfg = repositoryRoot.resolve("models").resolve("demo.cfg");
-		Path otherCfg = repositoryRoot.resolve("models").resolve("unrelated.cfg");
+		Path cfg = assistantRoot.resolve("examples").resolve("jaamsim").resolve("demo.cfg");
+		Path otherCfg = assistantRoot.resolve("examples").resolve("jaamsim").resolve("unrelated.cfg");
 		Path run = assistantRoot.resolve("output").resolve("offline-review").resolve("test_run");
 		Files.createDirectories(cfg.getParent());
 		Files.createDirectories(run);
@@ -79,13 +79,23 @@ public final class OfflineRclReportContractTest {
 		Files.writeString(report, report(cfg, "demo", false, false));
 		expectValid(verifier, report, cfg, assistantRoot);
 
-		// Correct repository-relative source path must also be accepted.
-		Path relative = repositoryRoot.relativize(cfg);
-		Files.writeString(report, report(relative, "demo", false, false)
-				.replace(escape(relative.toAbsolutePath().normalize().toString()),
-						escape(relative.toString())));
-		Files.writeString(status, statuses(cfg, "demo"));
+		// Python display_path() makes paths relative to academic-assistant,
+		// not the enclosing JAAM_AI_NATIVE directory.
+		Path relative = assistantRoot.relativize(cfg);
+		String absolute = escape(cfg.toAbsolutePath().normalize().toString());
+		Files.writeString(report, report(cfg, "demo", false, false)
+				.replace(absolute, escape(relative.toString())));
+		Files.writeString(status, statuses(cfg, "demo")
+				.replace(absolute, escape(relative.toString())));
 		expectValid(verifier, report, cfg, assistantRoot);
+
+		// The same relative string interpreted against JAAM_AI_NATIVE is wrong.
+		// It must not be accepted as provenance for this model.
+		Path staleNativeRelative = repositoryRoot.relativize(cfg);
+		Files.writeString(report, report(cfg, "demo", false, false)
+				.replace(absolute, escape(staleNativeRelative.toString())));
+		Files.writeString(status, statuses(cfg, "demo"));
+		expectBlocked(verifier, report, cfg, assistantRoot);
 
 		Files.writeString(report, "{not valid JSON}");
 		expectBlocked(verifier, report, cfg, assistantRoot);
