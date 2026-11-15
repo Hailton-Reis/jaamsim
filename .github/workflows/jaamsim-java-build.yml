@@ -9,7 +9,6 @@ on:
       - "build.xml"
       - "scripts/build.sh"
       - "scripts/package_native_candidate.py"
-      - "RODAR_JAAM_AI_COMPLETO.cmd"
       - ".github/workflows/jaamsim-java-build.yml"
   workflow_dispatch:
 
@@ -53,7 +52,7 @@ jobs:
       - name: Upload standalone review package (not a release)
         uses: actions/upload-artifact@v4
         with:
-          name: jaamsim-native-candidate-complete
+          name: jaam-ai-native-module
           path: build/dist/jaam-ai-native-candidate.zip
           retention-days: 7
       - name: Upload unvalidated candidate JAR separately
