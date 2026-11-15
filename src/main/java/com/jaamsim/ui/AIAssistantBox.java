@@ -361,6 +361,7 @@ public class AIAssistantBox extends FrameBox {
 		panel.setOpaque(false);
 		panel.add(createPromptButton("Dicas", "me dê dicas para continuar"));
 		panel.add(createPromptButton("Revisar modelo", "revise meu modelo"));
+		panel.add(createPromptButton("Histórico RCL", "mostrar histórico de revisões"));
 		panel.add(createPromptButton("Criar PRD", "quero construir uma simulação do zero"));
 		panel.add(createPromptButton("Explicar alerta", "explique este alerta"));
 		panel.add(createPromptButton("Quando usar StatFit?", "quando uso StatFit?"));
@@ -1228,6 +1229,12 @@ public class AIAssistantBox extends FrameBox {
 			return;
 		}
 
+		if (isExplicitReviewHistoryIntent(normalized)) {
+			appendChatMessage("Assistente", "Vou consultar o histórico local de revisões, sem executar a análise novamente.");
+			showReviewHistory();
+			return;
+		}
+
 		if (isExplicitReviewIntent(normalized)) {
 			appendChatMessage("Assistente", "Vou revisar o modelo salvo com as regras locais. Se o modelo ainda não foi salvo como .cfg, o JaamSim vai pedir esse passo primeiro.");
 			runLocalRcl();
@@ -1325,13 +1332,20 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static boolean looksLikeCommand(String value) {
-		return isExplicitReviewIntent(value)
+		return isExplicitReviewHistoryIntent(value)
+				|| isExplicitReviewIntent(value)
 				|| isExplicitSuggestionListIntent(value)
 				|| isExplicitAcceptSuggestionIntent(value)
 				|| isExplicitRejectSuggestionIntent(value)
 				|| containsAny(value, "statfit",
 				"distribuic", "csv", "dados", "abrir", "pasta", "config", "notific", "cooldown",
 				"autocorrec", "dica", "ajuda", "proximo passo", "proximos passos");
+	}
+
+	private static boolean isExplicitReviewHistoryIntent(String value) {
+		return containsAny(value, "historico rcl", "historico de revisao",
+				"historico de revisoes", "mostrar historico", "listar revisoes",
+				"ultimas revisoes", "ver revisoes", "revisoes anteriores");
 	}
 
 	private static boolean isExplicitReviewIntent(String value) {
@@ -1935,6 +1949,137 @@ public class AIAssistantBox extends FrameBox {
 					+ ": " + ex.getMessage() + System.lineSeparator());
 			return true;
 		}
+	}
+
+	/**
+	 * Display local RCL history; read-only. The active CFG path selects the
+	 * model, while its current hash distinguishes previous revisions.
+	 * No Python, JaamSim batch, LLM or P004 action is dispatched.
+	 */
+	private void showReviewHistory() {
+		try {
+			JaamSimModel simModel = GUIFrame.getJaamSimModel();
+			File cfgFile = simModel == null ? null : simModel.getConfigFile();
+			File anchor = cfgFile == null ? new File(".") : cfgFile;
+			Path assistantRoot = findAssistantRoot(anchor);
+			if (assistantRoot == null) {
+				appendStatusText("Histórico RCL: extensão acadêmica indisponível."
+						+ System.lineSeparator());
+				return;
+			}
+			Path root = getRclOutputRoot(assistantRoot);
+			if (!Files.isDirectory(root)) {
+				appendStatusText("Histórico RCL: ainda não há revisões registradas."
+						+ System.lineSeparator());
+				return;
+			}
+
+			Path selected = cfgFile == null ? null : cfgFile.toPath().toAbsolutePath().normalize();
+			String currentHash = null;
+			if (selected != null && Files.isRegularFile(selected)) {
+				try {
+					currentHash = sha256File(selected);
+				}
+				catch (IOException ex) {
+					// History remains available, but no current-version match is claimed.
+				}
+			}
+
+			ArrayList<Path> runs = new ArrayList<>();
+			try (java.util.stream.Stream<Path> folders = Files.list(root)) {
+				for (Path folder : (Iterable<Path>) folders::iterator) {
+					if (Files.isDirectory(folder, LinkOption.NOFOLLOW_LINKS))
+						runs.add(folder);
+				}
+			}
+			Collections.sort(runs, (a, b) -> {
+				try {
+					return Files.getLastModifiedTime(b).compareTo(Files.getLastModifiedTime(a));
+				}
+				catch (IOException ex) {
+					return a.toString().compareTo(b.toString());
+				}
+			});
+
+			StringBuilder sb = new StringBuilder();
+			sb.append("Histórico RCL — consulta local, sem executar nova revisão")
+					.append(System.lineSeparator());
+			if (selected != null) {
+				sb.append("Modelo selecionado: ").append(selected).append(System.lineSeparator());
+				if (currentHash == null)
+					sb.append("Hash atual: indisponível (não confirma equivalência de versão)")
+							.append(System.lineSeparator());
+			}
+			else {
+				sb.append("Sem CFG ativo: exibindo as últimas revisões locais de todos os modelos.")
+						.append(System.lineSeparator());
+			}
+			int shown = 0;
+						for (Path run : runs) {
+				Path receiptFile = run.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+				if (!Files.isRegularFile(receiptFile, LinkOption.NOFOLLOW_LINKS))
+					continue;
+				try {
+					JSONValue receipt = readJsonFile(receiptFile);
+					if (!"jaam.ai.offline_review.receipt.v1".equals(
+							getStringChild(receipt, "schema", "")))
+						continue;
+					String sourceRaw = getStringChild(receipt, "source_cfg", "");
+					if (sourceRaw.isEmpty())
+						continue;
+					Path source = Paths.get(sourceRaw).toAbsolutePath().normalize();
+					if (selected != null && !selected.equals(source)) {
+						continue;
+					}
+					String sha = getStringChild(receipt, "cfg_sha256_after", "");
+					boolean sameVersion = currentHash != null
+							&& currentHash.equalsIgnoreCase(sha)
+							&& Boolean.TRUE.equals(isTrueChild(receipt, "cfg_unchanged"));
+					String runId = getStringChild(receipt, "run_id", run.getFileName().toString());
+					String outcome = getStringChild(receipt, "outcome", "RESULTADO_DESCONHECIDO");
+					String sourceLabel = "JAAMSIM_GUI_RCL".equals(
+							getStringChild(receipt, "origin", "")) ? "janela JaamSim" : "CMD central/local";
+					sb.append(System.lineSeparator());
+					sb.append(shown + 1).append(". ").append(runId)
+							.append(" | ").append(outcome)
+							.append(" | ").append(sourceLabel).append(System.lineSeparator());
+					sb.append("   CFG: ").append(source.getFileName()).append(System.lineSeparator());
+					sb.append("   UTC: ").append(getStringChild(receipt, "utc_timestamp", "não informado"))
+							.append(System.lineSeparator());
+					if (selected != null) {
+						sb.append("   Versão do CFG: ")
+								.append(sameVersion ? "mesmo conteúdo atual" : "outra versão / não verificável")
+								.append(System.lineSeparator());
+					}
+					sb.append("   Pasta: ").append(run.toAbsolutePath()).append(System.lineSeparator());
+					shown++;
+					if (shown >= 10)
+						break;
+				}
+				catch (Exception ex) {
+					// Corrupted receipts cannot be treated as reliable evidence.
+				}
+			}
+			if (shown == 0)
+				sb.append("Nenhum recibo compatível com o modelo selecionado.")
+						.append(System.lineSeparator());
+			sb.append(System.lineSeparator());
+			sb.append("Recibos são registros locais, não assinaturas digitais.")
+					.append(System.lineSeparator());
+			sb.append("Decisões anteriores somente são usadas quando caminho, SHA-256 e estado coincidem.")
+					.append(System.lineSeparator());
+			appendStatusText(sb.toString());
+		}
+		catch (Exception ex) {
+			appendStatusText("Histórico RCL: falha ao ler registros: "
+					+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+					+ System.lineSeparator());
+		}
+	}
+
+	private static Boolean isTrueChild(JSONValue parent, String key) {
+		JSONValue value = getMapChild(parent, key);
+		return value == null ? null : value.isTrue();
 	}
 
 	private void showLatestSuggestions() {
