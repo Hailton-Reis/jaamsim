@@ -96,3 +96,41 @@ explicitas de JaamSim nativo e revisao RCL de inferencia P004.
 O mesmo Python e escolhido em `Resolve-JaamPython` nas opcoes 8 e 9; se `JAAMSIM_PYTHON` foi configurado e falha, nao existe fallback silencioso. O hash do CFG permite **detectar**, mas nao desfazer, alteracoes acidentais ou externas. Os comandos de verificacao de versao sao disparados somente nas opcoes 8 e 9, nao ao abrir o menu.
 
 A distribuicao privada v0.54 inclui backups SHA-256 das candidatas v0.50 a v0.53; o menu de base permanece 1-11. O modulo publico Java/Python foi mantido byte a byte, sem novas mudancas no codigo do simulador. Tudo nesta etapa e **inspecao estatica**, sem testar o CMD em Windows ou o JaamSim graficamente.
+
+
+## v0.55 — isolamento da evidencia por revisao (candidata privada)
+
+O **mesmo CMD historico** (`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`)
+foi atualizado em uma candidata privada **nao instalada**; as opcoes 1-11
+e a entrada do atalho permanecem. Em relacao a v0.54:
+
+- A configuracao explicita `JAAMSIM_PYTHON` aceita caminho
+  relativo, como `.venv\\Scripts\\python.exe`, interpretado **a partir
+  da pasta do CMD** (e nao da pasta "Iniciar em" do atalho); se esse caminho
+  estiver incorreto, o menu bloqueia a operacao sem trocar silenciosamente
+  por outro interpretador no PATH.
+- Cada escolha de revisao offline (opcao **9**) passa a usar
+  `JAAM_AI_NATIVE/extensions/academic-assistant/output/offline-review/<run_id>/`.
+  Assim, relatorios anteriores nao sao silenciosamente substituidos pelo
+  simples reaproveitamento de um diretorio compartilhado.
+- O arquivo `JAAM_AI_OFFLINE_REVIEW_RECEIPT.json`, local a cada
+  revisao, registra ID da sessao, data UTC, caminho do CFG de entrada,
+  hashes SHA-256 antes e depois, resultado e codigo de saida, hash fixado
+  do manifesto nativo, e flags negativas para autoedicao, LLM, P004 e
+  Full45. A opcao **10** continua abrindo a pasta agregadora.
+- A conferencia do CFG acontece mesmo quando o Python retorna codigo
+  de erro. Um arquivo alterado ou nao verificavel impede status de
+  sucesso; nenhuma restauracao/reedicao automatica e tentada.
+  Se o recibo nao puder ser gravado, a revisao e sinalizada como falha.
+- Backups independentes **v0.50-v0.54**, preservados por hash.
+  O CMD candidato v0.55 tem SHA-256
+  `a833c9876cde2960d342d818104190c400e4bfdfef020c1bf19ab2b296b37421`,
+  2.143.865 bytes (ver manifesto privado para tamanho exato).
+  O ZIP candidato tem **57 entradas** e SHA-256
+  `ffe2daf4f7b99e147d192e2c25f490499ad375fad589f1bdd45c66bac259e39b`.
+
+O recibo nao e assinatura digital ou prova independente de execucao;
+e um registro local auditavel por seu conteudo. Nenhuma GUI, CMD,
+Python de revisao ou experimento foi executado como teste manual nesta
+etapa. O atalho e o CMD ativo do Windows/Drive nao foram modificados.
+**P004 DENY / Full45 NO-GO; PR em rascunho.**
