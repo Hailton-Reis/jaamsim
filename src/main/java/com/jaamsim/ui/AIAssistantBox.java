@@ -2220,6 +2220,7 @@ public class AIAssistantBox extends FrameBox {
 		Path source = cfgFile.toAbsolutePath().normalize();
 		Path newest = null;
 		FileTime newestTime = null;
+		Path assistantRoot = reportRoot.getParent().getParent();
 		try (java.util.stream.Stream<Path> runs = Files.list(reportRoot)) {
 			for (Path run : (Iterable<Path>) runs::iterator) {
 				if (!Files.isDirectory(run, LinkOption.NOFOLLOW_LINKS))
@@ -2236,17 +2237,22 @@ public class AIAssistantBox extends FrameBox {
 							|| !cfgSha.equalsIgnoreCase(recordedSha)
 							|| unchanged == null || !unchanged.isTrue())
 						continue;
-					// The receipt is not a signature; limit cross-run reuse to completed analyses.
+
 					String outcome = getStringChild(receipt, "outcome", "");
 					if (!"COMPLETE_OFFLINE".equals(outcome) && !"COMPLETED_OFFLINE".equals(outcome))
 						continue;
-					// A complete receipt must correspond to a real, well-formed
-					// report for this exact model and CFG path.
-					Path candidateReport = run.resolve(buildModelId(cfgFile.toFile()) + "_offline_review.json");
-					Path assistantRoot = reportRoot.getParent().getParent();
-					if (validateOfflineRclReport(candidateReport, cfgFile,
-							buildModelId(cfgFile.toFile()), assistantRoot) != null)
+
+					// CMD reviews let the Python parser choose a normalized
+					// model_id. The GUI may use a different explicit model_id.
+					// Require ONE report in this run and read its actual ID,
+					// rather than guessing a filename from the CFG name.
+					Path candidateReport = findUniqueRclReport(run);
+					if (candidateReport == null
+							|| validateOfflineRclReport(candidateReport, cfgFile, null, assistantRoot) != null)
 						continue;
+					JSONValue report = readJsonFile(candidateReport);
+					String actualModelId = getStringChild(getMapChild(report, "analysis"), "model_id", "");
+
 					String pinnedReportSha = getStringChild(receipt, "report_sha256", "");
 					String origin = getStringChild(receipt, "origin", "");
 					if (pinnedReportSha.isEmpty()) {
@@ -2257,40 +2263,49 @@ public class AIAssistantBox extends FrameBox {
 					}
 					else if (!pinnedReportSha.equalsIgnoreCase(sha256File(candidateReport)))
 						continue;
+
+					Path statusFile = run.resolve(actualModelId + "_suggestions_status.json");
+					if (!Files.isRegularFile(statusFile, LinkOption.NOFOLLOW_LINKS))
+						continue;
+					JSONValue status = readJsonFile(statusFile);
+					if (!actualModelId.equals(getStringChild(status, "model_id", "")))
+						continue;
+					Path statusSource = resolveReportedSource(
+							getStringChild(status, "input_file", ""), assistantRoot);
+					if (!source.equals(statusSource))
+						continue;
+
+					FileTime modified = Files.getLastModifiedTime(statusFile);
+					if (newest == null || modified.compareTo(newestTime) > 0) {
+						newest = statusFile;
+						newestTime = modified;
+					}
 				}
 				catch (Exception ex) {
-					continue; // malformed or partial receipts cannot authorize importing decisions
-				}
-				try (java.util.stream.Stream<Path> statuses = Files.list(run)) {
-					for (Path file : (Iterable<Path>) statuses::iterator) {
-						if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
-								|| !file.getFileName().toString().endsWith("_suggestions_status.json"))
-							continue;
-						try {
-							JSONValue statusJson = readJsonFile(file);
-							String input = getStringChild(statusJson, "input_file", "");
-							if (input.isEmpty())
-								continue;
-							// Python display_path() uses assistant_paths.ASSISTANT_ROOT,
-							// not JAAM_AI_NATIVE or the process working directory.
-							Path assistantRootForStatus = reportRoot.getParent().getParent();
-							Path statusSource = resolveReportedSource(input, assistantRootForStatus);
-							if (!source.equals(statusSource))
-								continue;
-							FileTime modified = Files.getLastModifiedTime(file);
-							if (newest == null || modified.compareTo(newestTime) > 0) {
-								newest = file;
-								newestTime = modified;
-							}
-						}
-						catch (Exception ex) {
-							// Ignore a corrupted or unrelated status, not the entire run.
-						}
-					}
+					// Corrupt or partial histories cannot authorize decisions.
 				}
 			}
 		}
 		return newest;
+	}
+
+	/**
+	 * Fail closed for runs with zero or multiple RCL reports. A run is a
+	 * single-model review; ambiguity cannot select trusted suggestions.
+	 */
+	private static Path findUniqueRclReport(Path run) throws IOException {
+		Path found = null;
+		try (java.util.stream.Stream<Path> reports = Files.list(run)) {
+			for (Path path : (Iterable<Path>) reports::iterator) {
+				if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+						|| !path.getFileName().toString().endsWith("_offline_review.json"))
+					continue;
+				if (found != null)
+					return null;
+				found = path;
+			}
+		}
+		return found;
 	}
 
 	/**
@@ -2317,8 +2332,14 @@ public class AIAssistantBox extends FrameBox {
 				return "origem do CFG não corresponde ao modelo selecionado";
 
 			JSONValue analysis = getMapChild(report, "analysis");
-			if (!modelId.equals(getStringChild(analysis, "model_id", "")))
+			String actualModelId = getStringChild(analysis, "model_id", "");
+			if (actualModelId.isEmpty() || actualModelId.equals(".") || actualModelId.equals("..")
+					|| !actualModelId.matches("[A-Za-z0-9._-]+"))
+				return "identificador do modelo inválido para arquivo local";
+			if (modelId != null && !modelId.equals(actualModelId))
 				return "identificador do modelo é diferente";
+			if (!reportFile.getFileName().toString().equals(actualModelId + "_offline_review.json"))
+				return "arquivo do relatório não corresponde ao identificador declarado";
 
 			JSONValue usage = getMapChild(report, "ai_usage");
 			if (!isFalseFlag(usage, "internet_api")
@@ -2329,11 +2350,11 @@ public class AIAssistantBox extends FrameBox {
 			if (!isFalseFlag(llmAssist, "enabled"))
 				return "relatório registra camada LLM habilitada";
 
-			Path statusFile = reportFile.getParent().resolve(modelId + "_suggestions_status.json");
+			Path statusFile = reportFile.getParent().resolve(actualModelId + "_suggestions_status.json");
 			if (!Files.isRegularFile(statusFile, LinkOption.NOFOLLOW_LINKS))
 				return "arquivo de status da mesma revisão não encontrado";
 			JSONValue statuses = readJsonFile(statusFile);
-			if (!modelId.equals(getStringChild(statuses, "model_id", "")))
+			if (!actualModelId.equals(getStringChild(statuses, "model_id", "")))
 				return "arquivo de status pertence a outro modelo";
 			Path statusSource = resolveReportedSource(getStringChild(statuses, "input_file", ""), assistantRoot);
 			if (statusSource == null || !recorded.equals(statusSource))
