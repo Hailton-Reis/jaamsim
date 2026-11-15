@@ -51,6 +51,7 @@ class OfflineReviewResult:
     suggestion_audit: list["SuggestionDecisionAudit"]
     parser_schema_version: str | None
     parser_warnings: list[dict[str, Any]]
+    status_transfer: dict[str, Any]
 
 
 @dataclass
@@ -469,6 +470,9 @@ def load_suggestion_statuses(status_file: Path | None) -> dict[str, dict[str, st
                 "status_actor": str(entry.get("status_actor", entry.get("actor", ""))),
                 "status_updated_at": str(entry.get("status_updated_at", entry.get("updated_at", ""))),
             }
+            for identity_key in ("rule_id", "component_id", "action_type", "suggested_change"):
+                if identity_key in entry:
+                    normalized[identity_key] = str(entry[identity_key])
         else:
             raise ValueError(f"Status invalido para {suggestion_id}: {entry}")
         if status not in ALLOWED_SUGGESTION_STATUSES:
@@ -476,6 +480,42 @@ def load_suggestion_statuses(status_file: Path | None) -> dict[str, dict[str, st
             raise ValueError(f"Status invalido para {suggestion_id}: {status}. Permitidos: {allowed}")
         statuses[str(suggestion_id)] = normalized
     return statuses
+
+
+def filter_status_transfers(
+    suggestions: list[LocalSuggestion],
+    imported: dict[str, dict[str, str]],
+    *,
+    strict_identity: bool,
+) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
+    """Never attach an old SUG001 decision to a new rule after engine changes."""
+    if not strict_identity:
+        return imported, {"strict_identity_required": False, "imported": len(imported), "rejected": []}
+
+    indexed = {item.suggestion_id: item for item in suggestions}
+    accepted: dict[str, dict[str, str]] = {}
+    rejected: list[dict[str, str]] = []
+    for suggestion_id, override in imported.items():
+        current = indexed.get(suggestion_id)
+        if current is None:
+            rejected.append({"suggestion_id": suggestion_id, "reason": "suggestion_id_missing"})
+            continue
+        expected = {
+            "rule_id": current.rule_id,
+            "component_id": current.component_id,
+            "action_type": current.action_type,
+            "suggested_change": current.suggested_change,
+        }
+        if any(override.get(key) != value for key, value in expected.items()):
+            rejected.append({
+                "suggestion_id": suggestion_id,
+                "reason": "identity_missing_or_changed",
+                "current_rule_id": current.rule_id,
+                "recorded_rule_id": override.get("rule_id", ""),
+            })
+            continue
+        accepted[suggestion_id] = override
+    return accepted, {"strict_identity_required": True, "imported": len(accepted), "rejected": rejected}
 
 
 def apply_suggestion_statuses(
@@ -655,6 +695,7 @@ def render_offline_markdown(
     local_suggestions: list[LocalSuggestion],
     allowed_changes: list[AllowedChange],
     suggestion_audit: list[SuggestionDecisionAudit],
+    status_transfer: dict[str, Any],
     llm_assist_enabled: bool,
     llm_assist_markdown_file: str | None,
     reviewed_snapshot_file: str | None,
@@ -829,6 +870,17 @@ def render_offline_markdown(
                 "",
             ]
         )
+    lines.extend([
+        "",
+        "## Transferencia de decisoes entre revisoes",
+        "",
+        "- Verificacao de identidade estrita: " + str(status_transfer["strict_identity_required"]),
+        "- Decisoes importadas: " + str(status_transfer["imported"]),
+        "- Decisoes rejeitadas: " + str(len(status_transfer["rejected"])),
+        "",
+    ])
+    for rejected in status_transfer["rejected"]:
+        lines.append("- Decisao ignorada: " + rejected["suggestion_id"] + " / " + rejected["reason"])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -846,6 +898,7 @@ def write_offline_outputs(
     local_suggestions: list[LocalSuggestion],
     allowed_changes: list[AllowedChange],
     suggestion_audit: list[SuggestionDecisionAudit],
+    status_transfer: dict[str, Any],
     llm_assist_enabled: bool,
     llm_assist_json_file: str | None,
     llm_assist_markdown_file: str | None,
@@ -892,6 +945,7 @@ def write_offline_outputs(
         "allowed_changes": [asdict(change) for change in allowed_changes],
         "suggestion_decision_audit": [asdict(audit) for audit in suggestion_audit],
         "local_suggestions": [asdict(suggestion) for suggestion in local_suggestions],
+        "status_transfer": status_transfer,
         "analysis": asdict(analysis),
     }
     suggestions_payload = {
@@ -943,6 +997,7 @@ def write_offline_outputs(
             local_suggestions=local_suggestions,
             allowed_changes=allowed_changes,
             suggestion_audit=suggestion_audit,
+            status_transfer=status_transfer,
             llm_assist_enabled=llm_assist_enabled,
             llm_assist_markdown_file=llm_assist_markdown_file,
             reviewed_snapshot_file=reviewed_snapshot_file,
@@ -966,6 +1021,7 @@ def review_input(
     objective: str | None = None,
     user_profile: str = "beginner",
     status_file: Path | None = None,
+    strict_status_identity: bool = False,
     apply_safe_changes: bool = False,
     llm_assist: bool = False,
     llm_provider_order: str | None = None,
@@ -1007,6 +1063,9 @@ def review_input(
     analysis = build_analysis_from_snapshot(snapshot_path, expectations, evaluate_expected_rules=use_matrix)
     local_suggestions = build_local_suggestions(analysis)
     status_overrides = load_suggestion_statuses(status_file)
+    status_overrides, status_transfer = filter_status_transfers(
+        local_suggestions, status_overrides, strict_identity=strict_status_identity,
+    )
     local_suggestions = apply_suggestion_statuses(local_suggestions, status_overrides)
     allowed_changes = build_allowed_changes(local_suggestions)
     suggestion_audit = build_suggestion_audit(local_suggestions, allowed_changes, status_overrides)
@@ -1030,6 +1089,7 @@ def review_input(
         local_suggestions=local_suggestions,
         allowed_changes=allowed_changes,
         suggestion_audit=suggestion_audit,
+        status_transfer=status_transfer,
         llm_assist_enabled=llm_assist,
         llm_assist_json_file=llm_assist_json_file,
         llm_assist_markdown_file=llm_assist_markdown_file,
@@ -1065,6 +1125,7 @@ def review_input(
         suggestion_audit=suggestion_audit,
         parser_schema_version=parser_schema_version,
         parser_warnings=parser_warnings,
+        status_transfer=status_transfer,
     )
 
 
@@ -1153,6 +1214,11 @@ def parse_args() -> argparse.Namespace:
         help="JSON opcional com status de sugestoes para reprocessar aceite/rejeicao.",
     )
     parser.add_argument(
+        "--strict-status-identity",
+        action="store_true",
+        help="Reaproveita somente sugestoes com identidade de regra, componente, acao e texto iguais.",
+    )
+    parser.add_argument(
         "--apply-safe-changes",
         action="store_true",
         help="Gera copia de snapshot apenas com mudancas seguras de metadados aceitas.",
@@ -1214,6 +1280,7 @@ def main() -> None:
             objective=args.objective,
             user_profile=args.profile,
             status_file=args.status_file,
+            strict_status_identity=args.strict_status_identity,
             apply_safe_changes=args.apply_safe_changes,
             llm_assist=args.llm_assist,
             llm_provider_order=args.llm_provider_order,
