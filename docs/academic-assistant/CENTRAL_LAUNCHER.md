@@ -391,3 +391,68 @@ O pacote é uma **candidata estática**; a compilação e os testes
 automatizados não comprovam operação gráfica nem aceitação no Windows.
 Nenhum arquivo ativo do Drive/Windows foi substituído. **Não iniciar
 P004, Full45, inferência, simulação experimental ou merge sem aprovação.**
+
+
+## v0.60 — correção do contrato de caminhos RCL Java ↔ Python ↔ CMD (15/11/2026)
+
+**Ponto de entrada único:** `00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`,
+mesmo nome e caminho do atalho existente. Candidata privada não instalada;
+funções 1–11 e bloqueios `P004 DENY / Full45 NO-GO` preservados.
+
+### Falha de integração corrigida
+
+O Python implementa `display_path()` em `modulo_ia_offline.py`
+usando `snapshot_analyzer.ROOT == assistant_paths.ASSISTANT_ROOT`.
+Isso significa que entradas dentro da extensão são gravadas como caminho
+**relativo a** `JAAM_AI_NATIVE/extensions/academic-assistant`.
+
+Na v0.59, a validação de relatório na GUI (`resolveReportedSource`) e
+a opção 9 do CMD assumiam equivocadamente a raiz `JAAM_AI_NATIVE`.
+Isso podia bloquear um CFG válido (ou impedir reutilização legítima de
+decisões) mesmo com hashes corretos.
+
+**Correção no código público Java:**
+- `resolveReportedSource` resolve caminhos relativos somente a partir
+  do diretório efetivo da extensão, preservando caminhos absolutos;
+- `findSuggestionStatusFile` utiliza a mesma base para a origem
+  registrada no JSON de status, após conferir recibo, modelo e SHA-256;
+- o teste headless `OfflineRclReportContractTest` agora inclui fontes
+  relativas válidas, rejeita a raiz antiga, verifica recuperação segura
+  de decisões por caminho/recibo e bloqueia histórico adulterado ou
+  de outro CFG. **19 verificações passaram no Java CI**.
+
+**Correção na candidata privada do CMD:** a opção 9 define
+`$assistantRoot` a partir de `JAAM_AI_NATIVE/extensions/academic-assistant`.
+Os campos `input_file` do relatório e do status passam a ser resolvidos
+por essa mesma raiz; nomes absolutos continuam inalterados. Sem fallback
+para diretórios arbitrários e sem relaxar as demais restrições.
+
+### Identificação auditável da candidata
+
+- CMD v0.60: **2.147.579 bytes**, SHA-256
+  `267459ffd25eade9211e55543fcdd3147dac6526ac9420d179d20eada3438b66`.
+- Manifesto do módulo nativo SHA-256
+  `320b89f5148593799b97c64654b6510d42a90d450ac9fe82374903f8fc6cbf50`;
+  **37/37 arquivos** íntegros por tamanho e SHA-256.
+- ZIP privado `JAAM_AI_V060_CMD_ORIGINAL_CAMINHOS_RCL_CORRIGIDOS_2026-11-15.zip`:
+  SHA-256 `61fdd5276cc42d2fad0be95164955502cd4028869ada2dcba6b053ba48715ffd`,
+  **74 entradas**, sem duplicatas.
+- **10 backups conferidos** (v0.50–v0.59), cada um com seu CMD,
+  sidecar e manifesto históricos íntegros.
+- [Java JDK25 + 19 verificações de contrato](https://github.com/Hailton-Reis/jaamsim/actions/runs/43774076166):
+  **SUCCESS**.
+- [Python 95 testes + 6 subtestes, matriz Windows/Linux × 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43774076179):
+  **SUCCESS**.
+- No manifesto do artefato nativo, `source_commit` representa o
+  **commit de merge temporário do PR usado pelo workflow**; a cabeça
+  da branch conferida é `2c14852549263559c56491d89459800e9ebfd1a2`,
+  registrada separadamente no manifesto privado.
+- Relatório de conferência estática `JAAM_AI_V060_STATIC_REPORT_2026-11-15.json`
+  e diff reversível `JAAM_AI_V060_DIFF_CMD_V059_V060.patch`.
+
+**Limites da comprovação:** o CI compila e exercita funções headless
+em arquivos de teste. Não houve teste manual de GUI, execução do CMD
+histórico no Windows, alteração do arquivo ativo em Google Drive,
+instalação ou mesclagem deste PR. Os recibos são registros locais,
+não assinaturas digitais. O estado segue `CANDIDATE_ONLY /
+GUI_PENDING / P004_DENY / FULL45_NO_GO`.
