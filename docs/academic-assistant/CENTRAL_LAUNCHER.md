@@ -18,6 +18,16 @@ nem outro atalho.
   SHA-256 do CMD:
   `d00cf3dcec3cf65fe554e2e6d0503ca07fb065c4e7a15b9b56e32006faf7314b`.
 
+- v0.53: candidata privada com pasta nativa unica, confirmacao sob demanda
+  de Java 25+ na opcao 8 e de Python 3.11+ na opcao 9; SHA-256
+  `b44b3f5e5c64c6725d211718c332efc9f9c85089ea81b4dcdba22bd893225fc5`.
+- **v0.54 (candidata atual, nao instalada):** preserva o mesmo CMD e menu,
+  resolve **um Python 3.11+** para ambas as janelas Java e o motor RCL,
+  verifica paths relativos de .cfg desde a pasta do CMD e confere hash
+  SHA-256 do arquivo antes e depois da revisao, sem edicao automatica.
+  SHA-256 do CMD:
+  `a72f348860e88a6395e347e9134c9b1de2f7d28fcf51dbdb9e4627903063c3b5`.
+
 | Escolha do menu central | Comportamento |
 |---|---|
 | Enter/1 | Somente observar; nao iniciar processos |
@@ -29,7 +39,7 @@ nem outro atalho.
 | 10 | Abrir pasta local de relatorios |
 | 11 | Mostrar status e verificacao dos arquivos do modulo, sem abrir aplicativos |
 
-A v0.52 fixa o SHA-256 do arquivo
+Desde v0.52, o CMD fixa o SHA-256 do arquivo
 `JAAM_AI_NATIVE/MANIFEST_SHA256.json` como
 `61b18f7d89f345e212e761514e1f292303e93722daf82bfc54d912287357e180`.
 O manifesto tem **37 arquivos** e registra SHA-256/tamanho de cada
@@ -52,23 +62,25 @@ A candidata privada pode ser organizada como:
 00_PROJETO_ATUAL/
   RODAR_JAAM_AI_COMPLETO.cmd           <- MESMO destino do atalho
   RODAR_JAAM_AI_COMPLETO.cmd.sha256
-  JAAM_AI_LAB_V0_52_RELEASE_MANIFEST.json
+  JAAM_AI_LAB_V0_54_RELEASE_MANIFEST.json
   JAAM_AI_NATIVE/
     MANIFEST_SHA256.json
     JaamSim2026-03.jar
     extensions/academic-assistant/python/
   BACKUP_ORIGINAL_V050_NAO_ALTERAR/
   BACKUP_CANDIDATA_V051_NAO_INSTALAR/
+  BACKUP_CANDIDATA_V052_NAO_INSTALAR/
+  BACKUP_CANDIDATA_V053_NAO_INSTALAR/
 ```
 
 Os arquivos de backup sao **copias de arquivo**, e nao pontos de entrada.
-O substituicao do CMD ativo nao foi solicitada; executar uma atualizacao
+A substituicao do CMD ativo nao foi solicitada; executar uma atualizacao
 no futuro requer trocar a candidata e seu manifesto em conjunto.
 Nao modificar o atalho existente.
 
 ### Estado de engenharia e limites de comprovacao
 
-Verificado estaticamente no artefato privado v0.52:
+Verificado estaticamente no artefato privado v0.54:
 **37/37 hashes/tamanhos, manifesto pinado e integridade do ZIP**,
 sem executar o CMD. Verificado no GitHub: compilacao Java/JDK25 e
 regressoes Python, sem teste funcional do launcher.
@@ -76,5 +88,11 @@ regressoes Python, sem teste funcional do launcher.
 interacao, ensaio P004 ou Full45, alteracao do CMD ativo, mesclagem do PR.
 Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
 
-O relato de auditoria do CMD v0.52 passa a diferenciar as tentativas
+O relato de auditoria do CMD v0.54 continua a diferenciar as tentativas
 explicitas de JaamSim nativo e revisao RCL de inferencia P004.
+
+### Limites especificos da v0.54
+
+O mesmo Python e escolhido em `Resolve-JaamPython` nas opcoes 8 e 9; se `JAAMSIM_PYTHON` foi configurado e falha, nao existe fallback silencioso. O hash do CFG permite **detectar**, mas nao desfazer, alteracoes acidentais ou externas. Os comandos de verificacao de versao sao disparados somente nas opcoes 8 e 9, nao ao abrir o menu.
+
+A distribuicao privada v0.54 inclui backups SHA-256 das candidatas v0.50 a v0.53; o menu de base permanece 1-11. O modulo publico Java/Python foi mantido byte a byte, sem novas mudancas no codigo do simulador. Tudo nesta etapa e **inspecao estatica**, sem testar o CMD em Windows ou o JaamSim graficamente.
