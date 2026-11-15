@@ -260,3 +260,69 @@ SHA-256 do manifesto nativo.
 **Não realizado:** instalação no Windows, substituição do CMD ativo no Drive,
 teste manual/visual da GUI, execução do controlador histórico, experimento
 P004/Full45 ou mesclagem do PR.
+
+## v0.58 — proteção contra transferência de decisões entre regras alteradas
+
+**Candidata privada gerada em 15/11/2026; não instalada.** Mantém o nome
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd` e a mesma posição do atalho,
+com menus 1–11. P004 e Full45 continuam explicitamente NÃO autorizados.
+
+### Falha de engenharia corrigida
+
+O motor RCL enumerava sugestões como `SUG001`, `SUG002`, etc.
+O histórico da interface exigia previamente caminho e SHA-256 iguais para o
+CFG, mas **não identificava mudanças nas próprias regras entre versões**
+do motor. Portanto, `SUG001` de uma versão anterior poderia corresponder
+a outra regra depois de uma atualização do código, mesmo com o mesmo CFG.
+
+Agora o assistente GUI envia `--strict-status-identity` ao chamar
+`modulo_ia_offline.py` com um arquivo de status anterior. O motor só
+reaproveita uma decisão cuja entrada contenha a mesma:
+- `suggestion_id`, `rule_id` e `component_id`;
+- `action_type` e `suggested_change`.
+
+Decisões sem esses campos ou com identidade alterada **não são herdadas**;
+a nova sugestão fica `pending`, sem status `accepted`/ `rejected` e sem
+plano autorizado com base na decisão antiga. O JSON
+`*_offline_review.json` e o Markdown registram quantidades importadas
+e rejeições com motivos. O arquivo original de decisões permanece
+inalterado; a decisão humana deve ser reavaliada no contexto atual.
+
+**Compatibilidade:** importações explícitas antigas via CLI e
+`--status-file` seguem disponíveis sem a opção estrita. A janela GUI
+usa o modo estrito ao reaproveitar automaticamente histórico; o CMD
+central opção 9 não importa status anteriores por padrão. Este é um
+limite deliberado: mudanças de política não podem usar um identificador
+ordinal como prova suficiente de identidade de regra.
+
+### Evidências e empacotamento
+
+- Commits de implementação: `10c3be19` (Python), `6408cec3`
+  (GUI Java), `0f03b02a` (regressões).
+- **95 testes + 6 subtestes aprovados** na matriz Python 3.11/3.14 ×
+  Ubuntu/Windows: [CI](https://github.com/Hailton-Reis/jaamsim/actions/runs/43768787359).
+- Java JDK25 compilado e pacote nativo produzido:
+  [CI](https://github.com/Hailton-Reis/jaamsim/actions/runs/43768787464).
+- JAR gerado contém `AIAssistantBox.class`, `StatFitAssistantBox.class`
+  e a string de configuração `--strict-status-identity` verificada
+  estaticamente.
+- Módulo `JAAM_AI_NATIVE` com **37/37 arquivos** conferidos por tamanho
+  e SHA-256. Manifesto SHA-256:
+  `bce2be4cbf1171c57ea7729f9a5e2046a9ab3d1805c9433e95b1842e8a5e376a`.
+- CMD v0.58 com **2.145.091 bytes** e SHA-256:
+  `f3fd0f4d9f2ba4584bd2aac0dd0e67d03dc3192dddfd4dfc21dafa5cc87410b7`.
+  Em relação à v0.57, só mudaram marcadores de versão, manifesto
+  de integridade e pin SHA-256 do módulo. Todo o controlador histórico
+  incorporado é preservado byte a byte fora dessa lista explícita.
+- Pacote privado:
+  `JAAM_AI_V058_CMD_ORIGINAL_IMPORTACAO_DECISOES_SEGURA_2026-11-15.zip`;
+  SHA-256:
+  `b83ccd2c0f77eecbed9c7c4e781d7e94f932253a9ec7ab6fd72ca0498fd6cd26`.
+  **67 entradas**; backups íntegros v0.50 até v0.57.
+- Artefato adicional: relatório estático
+  `JAAM_AI_V058_STATIC_REPORT_2026-11-15.json` e patch da mudança
+  v0.57 → v0.58 do CMD original.
+
+**Não executado:** CMD no Windows, GUI, simulação, instalação, uso do atalho,
+inferência P004, Full45 ou merge. A versão ativa do Drive/Windows segue
+intacta; tudo é candidata de engenharia até aceite.
