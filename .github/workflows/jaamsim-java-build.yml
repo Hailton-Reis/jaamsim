@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/main/java/**"
+      - "src/test/java/**"
       - "src/main/java25/**"
       - "extensions/academic-assistant/python/**"
       - "build.xml"
@@ -46,6 +47,17 @@ jobs:
           jar tf "$jar_file" | grep -qx "com/jaamsim/ui/AIAssistantBox.class"
           jar tf "$jar_file" | grep -qx "com/jaamsim/ui/StatFitAssistantBox.class"
           echo "CANDIDATE_BUILT_NO_GUI_ACCEPTANCE $(sha256sum "$jar_file")"
+      - name: Check RCL report provenance contract (headless)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/test-classes
+          javac -encoding UTF-8 -cp build/jars/JaamSim2026-03.jar \
+            -d build/test-classes \
+            src/test/java/com/jaamsim/ui/OfflineRclReportContractTest.java
+          java -Djava.awt.headless=true \
+            -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
+            com.jaamsim.ui.OfflineRclReportContractTest
       - name: Package native candidate with Python support
         shell: bash
         run: python3 scripts/package_native_candidate.py
