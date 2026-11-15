@@ -524,3 +524,70 @@ em execução nem teste de segurança do Windows**.
 **Estado:** CANDIDATE_ONLY / GUI_PENDING / P004_DENY /
 FULL45_NO_GO. Não foi instalado sobre a v0.50 ativa,
 não foi executado manualmente no Windows e o PR continua draft.
+
+
+## v0.62 — recuperação segura de histórico entre CMD e GUI (15/11/2026)
+
+**Mesmo CMD principal**: `00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`,
+mesmo nome e caminho do atalho, menu 1–11, sem criar inicializador
+alternativo. É uma **candidata privada não instalada**.
+
+### Falha corrigida
+
+A janela nativa `AIAssistantBox.java` escolhe seu `modelId` com
+`buildModelId(cfgFile)`; o modo da opção 9 do CMD deixa o conversor
+Python escolher `to_id(path.stem)`. Os dois nomes podem diferir em
+maiúsculas, espaços e caracteres especiais. O método
+`findSuggestionStatusFile` da v0.61 procurava sempre
+`<buildModelId>_offline_review.json`, impedindo a interface de recuperar
+decisões legítimas de uma execução feita pelo CMD.
+
+Agora, em cada diretório individual de revisão, a janela:
+- aceita **exatamente um** `*_offline_review.json`; zero ou mais de um
+  significam histórico ambíguo e não autorizado;
+- lê o `analysis.model_id` efetivo do JSON (sem inventar nome);
+- exige identificador adequado para nome de arquivo local, e verifica
+  que o próprio filename e `*_suggestions_status.json` correspondem
+  a esse identificador;
+- exige o mesmo CFG absoluto, SHA-256, recibo de revisão concluída,
+  contexto offline e hash do relatório pinado quando disponível;
+- preserva `--strict-status-identity`: as decisões só passam para
+  a nova análise se a identidade da sugestão também coincidir.
+
+O método `validateOfflineRclReport` aceita um identificador esperado
+específico nas revisões **iniciadas pela GUI**, mas também pode verificar
+o identificador declarado no relatório quando está lendo histórico do
+CMD, sem relaxar os demais critérios.
+
+### Evidência reproduzível e artefato privado
+
+- Commits na branch: `3769088f` (Java) e `0aa5d6c0` (contratos).
+- [GitHub Actions — Java 25, empacotamento e **33 verificações headless**](https://github.com/Hailton-Reis/jaamsim/actions/runs/43776590833):
+  **SUCCESS**.
+- [GitHub Actions — Python **95 testes + 6 subtestes** por plataforma,
+  Windows/Linux × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43776590808):
+  **SUCCESS**.
+- Módulo `JAAM_AI_NATIVE` recompilado:
+  **37/37 arquivos** verificados por SHA-256 e tamanho. Manifesto:
+  `2807b193a02d1d0f0edcd10cc219cc3b665f0b9d595c710281a45873aa8c06aa`.
+- CMD candidato **v0.62**, 2.147.579 bytes, SHA-256:
+  `cf54d5b0fdef4c0940d4bfaadc1be141f4dc8048679bf0ece93e3a59f9a15ac1`.
+- ZIP privado
+  `JAAM_AI_V062_CMD_ORIGINAL_HISTORICO_RCL_CMD_JAVA_2026-11-15.zip`:
+  **80 entradas**, SHA-256
+  `ac44efab87a1cddaf111f92fb767645b2a8693347f012010bf8927e044cfbb3b`.
+- **12 backups preservados**, da v0.50 à v0.61, cada um com seu CMD
+  original e os respectivos sidecar/manifesto conferidos por SHA-256.
+- A modificação no CMD entre v0.61 e v0.62 foi **somente de versão e
+  manifesto fixado** (reversível byte a byte); a lógica MC-001/P004
+  foi mantida.
+- Auditoria estática:
+  `JAAM_AI_V062_STATIC_REPORT_2026-11-15.json`;
+  patch de comparação:
+  `JAAM_AI_V062_DIFF_CMD_V061_V062.patch`.
+
+**Limites:** os testes headless não são um teste visual ou funcional do
+programa em Windows. Não houve instalação nem alteração de CMD ativo,
+atalho, arquivos do Drive, modelo .cfg, ativação de P004, Full45 ou
+mesclagem do PR. Estado: `CANDIDATE_ONLY / GUI_PENDING /
+P004_DENY / FULL45_NO_GO`.
