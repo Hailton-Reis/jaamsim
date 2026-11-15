@@ -16,70 +16,27 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-PACKAGE_DIR = "JAAM_AI_JAAMSIM_NATIVE_CANDIDATE"
+PACKAGE_DIR = "JAAM_AI_NATIVE"
 ZIP_TIME = (2026, 11, 14, 0, 0, 0)
 
-README = """JAAM-AI / JAAMSIM 2026-03 - DESENVOLVIMENTO (SEM PROMOCAO)
+README = """JAAM-AI / MODULO NATIVO - CANDIDATO DE DESENVOLVIMENTO
 
-STATUS: CANDIDATE_ONLY / GUI_WINDOWS_PENDING / P004_DENY / FULL45_NO_GO
-O CMD central foi substituido por um menu pequeno e seguro. O arquivo
-historico de 2.1MB v0.50 NAO foi editado e NAO e redistribuido no ZIP.
+Este pacote NAO contem CMD principal. A entrada Windows e somente o
+RODAR_JAAM_AI_COMPLETO.cmd original no workspace 00_PROJETO_ATUAL.
+O CMD historico foi atualizado separadamente para o candidato v0.51,
+sem alterar o atalho ou iniciar qualquer fase de testes.
 
-PONTO DE ENTRADA WINDOWS:
-RODAR_JAAM_AI_COMPLETO.cmd
+Extraia esta pasta JAAM_AI_NATIVE ao lado do CMD original.
+O menu central incorpora opcoes:
+8 JaamSim IA e StatFit; 9 revisao CFG offline; 10 relatorios;
+11 estado do modulo.
+As opcoes legadas 1 a 7 continuam no CMD original.
 
-MENU:
-ENTER/1 - Estado passivo; nao inicia servidores, testes ou inferencia.
-2       - Abrir JaamSim 2026-03 (Assistente IA e StatFit).
-3       - Revisar .cfg somente offline, gerando relatorios.
-4       - Abrir relatorios existentes.
-5       - Entrar no modulo MC-001 v0.50 original, se instalado separadamente.
-6       - Compilar JaamSim com Ant no checkout de codigo (indisponivel no ZIP).
-0       - Sair.
-
-O modulo v0.50 original exige seus 3 arquivos imutaveis, na pasta:
-legacy\\MC001_v050\\
-  RODAR_JAAM_AI_COMPLETO.cmd
-  RODAR_JAAM_AI_COMPLETO.cmd.sha256
-  JAAM_AI_LAB_V0_50_RELEASE_MANIFEST.json
-Alternativamente, defina JAAM_LEGACY_DIR com caminho absoluto para uma
-pasta que contenha os 3 arquivos originais. O integrador verifica o hash
-SHA-256 esperado antes de delegar qualquer acao ao modulo historico.
-NAO RENOMEIE OU MODIFIQUE O ORIGINAL: sua opcao 7 e protegida por hash.
-
-Linux continua com RODAR_LINUX.sh, por compatibilidade com bash.
-Requisitos operacionais futuros: Java JDK 25 e Python 3.11 ou superior.
-Nenhum teste manual foi solicitado ou executado nesta etapa.
-Este pacote NAO inclui os 90 CFG oficiais de licenca mista.
-Nao sobrescreva versoes ja validadas.
-"""
-
-LEGACY_README = """MC-001 v0.50 - ARQUIVOS HISTORICOS FORA DESTE CANDIDATO
-
-Coloque nesta pasta os tres arquivos ORIGINAIS e inalterados disponiveis
-no workspace do projeto JAAM-AI no Google Drive:
-  RODAR_JAAM_AI_COMPLETO.cmd
-  RODAR_JAAM_AI_COMPLETO.cmd.sha256
-  JAAM_AI_LAB_V0_50_RELEASE_MANIFEST.json
-
-Atalho equivalente: configure JAAM_LEGACY_DIR apontando para a pasta original.
-O launcher central bloqueia o modulo se faltar arquivo ou checksum.
-A opcao 7 historica continua offline e DENY: nunca autoriza P004 ou Full45.
-"""
-
-
-
-
-LINUX = """#!/usr/bin/env bash
-set -euo pipefail
-cd "$(dirname "$0")"
-export JAAMSIM_ASSISTANT_ROOT="$PWD/extensions/academic-assistant"
-if [ -z "$(printenv JAAMSIM_PYTHON 2>/dev/null || true)" ]; then
-  export JAAMSIM_PYTHON=python3
-fi
-echo "JAAM-AI - candidato sem aceite GUI"
-java -version
-exec java -jar "JaamSim2026-03.jar"
+Java JDK 25 e Python 3.11+ so sao exigidos quando suas funcoes
+forem explicitamente acionadas pelo operador.
+P004 DENY / Full45 NO-GO. Sem inferencia automatica.
+Nao inclui o corpus licenca mista de 90 modelos oficiais.
+Nao substitua instalacao validada nem execute testes antes da revisao.
 """
 
 
@@ -102,13 +59,7 @@ def collect() -> dict[str, bytes]:
     for p in sorted((base / "examples").rglob("*")):
         if p.is_file() and p.suffix.lower() in {".cfg", ".csv", ".json", ".md", ".txt"}:
             files[p.relative_to(ROOT).as_posix()] = p.read_bytes()
-    files["LEIA_ANTES_DO_TESTE.txt"] = README.encode("utf-8")
-    central = ROOT / "RODAR_JAAM_AI_COMPLETO.cmd"
-    if not central.is_file():
-        raise FileNotFoundError("Central launcher missing in repository root")
-    files["RODAR_JAAM_AI_COMPLETO.cmd"] = central.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
-    files["legacy/MC001_v050/LEIA_ONDE_COLOCAR_ORIGINAL.txt"] = LEGACY_README.encode("utf-8")
-    files["RODAR_LINUX.sh"] = LINUX.encode("utf-8")
+    files["INTEGRACAO_COM_CMD_CENTRAL.txt"] = README.encode("utf-8")
     return files
 
 
@@ -152,7 +103,7 @@ def verify(output: Path) -> dict:
             data = archive.read(f"{PACKAGE_DIR}/{name}")
             if len(data) != row["bytes"] or digest(data) != row["sha256"]:
                 raise ValueError(f"Invalid SHA256 for {name}")
-        for name in ("JaamSim2026-03.jar", "RODAR_JAAM_AI_COMPLETO.cmd", "RODAR_LINUX.sh",
+        for name in ("JaamSim2026-03.jar",
                      "extensions/academic-assistant/python/modulo_ia_offline.py",
                      "extensions/academic-assistant/python/jaamsim_cfg_to_snapshot.py"):
             if f"{PACKAGE_DIR}/{name}" not in expected:
