@@ -1,75 +1,40 @@
-# JAAM-AI — CMD central e compatibilidade com MC-001
+# JAAM-AI — entrada central preservada
 
-**Estado:** candidata de desenvolvimento, sem aceitação gráfica/manual e sem promoção.
-**Entrada única no Windows:** `RODAR_JAAM_AI_COMPLETO.cmd`, na raiz do pacote.
+O ponto de entrada principal no Windows e o CMD historico
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd` no workspace privado,
+referenciado pelo atalho existente. **Nao criar segundo CMD principal.**
 
-## Por que não alterar o CMD v0.50 original
+O original v0.50 permanece preservado com SHA-256
+`ade157d85582a791b6600dc19b611d00535bb58f16b51c3c416c8cd8de5d3931`.
+A versao candidata privada v0.51 foi preparada mediante adicao, dentro
+do proprio codigo de menu PowerShell incorporado, das opcoes 8-11:
 
-O controlador legado do Google Drive tem **2.132.276 bytes**, contém o próprio
-PowerShell e o pacote de prontidão offline embutidos. Seu SHA-256 verificável é:
+| Opcao | Funcao |
+|---|---|
+| Enter/1 | Observar estado (comportamento anterior) |
+| 2-7 | Funcoes originais MC-001, protecoes e confirmacoes preservadas |
+| 8 | Abrir JaamSim com Assistente IA e StatFit |
+| 9 | Revisar arquivo CFG pelo motor RCL local, sem alterar o original |
+| 10 | Abrir a pasta de relatorios ja gerados |
+| 11 | Mostrar estado dos modulos, sem iniciar processos |
 
-`ade157d85582a791b6600dc19b611d00535bb58f16b51c3c416c8cd8de5d3931`
+A candidata privada e acompanhada por novo
+`RODAR_JAAM_AI_COMPLETO.cmd.sha256` e
+`JAAM_AI_LAB_V0_51_RELEASE_MANIFEST.json`. A opcao 7 confere
+o manifesto e o hash da nova candidata, permanecendo no escopo
+`OFFLINE_READINESS_DENY_ONLY`; nao ha P004 nem Full45 autorizado.
+O backup da v0.50 e mantido separado e sem modificacao de bytes.
 
-O manifesto `JAAM_AI_LAB_V0_50_RELEASE_MANIFEST.json` e o arquivo
-`RODAR_JAAM_AI_COMPLETO.cmd.sha256` associam a versão `0.50` ao
-nome e ao conteúdo **exatos** desse CMD. A opção 7 faz novamente essas
-verificações antes da revisão P004, que continua **DENY / Full45 NO-GO**.
-Renomear, reformular ou inserir outros comandos nesse arquivo invalidaria
-as evidências originais. O código novo **não** altera o arquivo legado.
+## Fronteira com o GitHub publico
 
-## Estrutura de desenvolvimento e integração
+O GitHub **nao** distribui o CMD historico de 2.1 MB nem uma copia
+alternativa que pudesse competir com o atalho ja existente. O workflow
+GitHub gera somente o pacote `JAAM_AI_NATIVE` com JAR Java, scripts
+Python e exemplos publicos. Coloca-se esse diretorio **ao lado** do
+CMD historico no workspace `00_PROJETO_ATUAL`. Os modulos nao sao
+executados automaticamente.
 
-```text
-JAAM_AI_JAAMSIM_NATIVE_CANDIDATE/
-  RODAR_JAAM_AI_COMPLETO.cmd       <-- UNICO ponto de entrada Windows
-  RODAR_LINUX.sh                    <-- entrada equivalente para Linux
-  JaamSim2026-03.jar                <-- Java 25 / IA + StatFit
-  MANIFEST_SHA256.json              <-- integridade do pacote candidato
-  extensions/
-    academic-assistant/
-      python/modulo_ia_offline.py   <-- revisao CFG deterministica
-      python/jaamsim_cfg_to_snapshot.py
-      output/offline-review/        <-- criado apenas apos revisao
-  legacy/MC001_v050/                <-- opcional, protegido por SHA-256
-    RODAR_JAAM_AI_COMPLETO.cmd      <-- arquivo v0.50 ORIGINAL e INALTERADO
-    RODAR_JAAM_AI_COMPLETO.cmd.sha256
-    JAAM_AI_LAB_V0_50_RELEASE_MANIFEST.json
-```
-
-O novo ponto de entrada nunca invoca o CMD antigo por engano: a opção MC-001
-só aparece após escolha explícita e exige os três arquivos íntegros. No
-pacote produzido pelo CI o subdiretório `legacy/MC001_v050` contém **somente
-instruções**; os três arquivos são preservados fora do repositório, no Drive
-do projeto. Para acoplar o legado, copie os três arquivos originais sem
-alteração de bytes ou configure `JAAM_LEGACY_DIR` apontando à sua pasta.
-
-## Menu e comandos
-
-| Entrada | Função | Comportamento seguro |
-|---|---|---|
-| Enter ou 1 | Estado | Somente leitura. Não inicia nenhum processo ou rede |
-| 2 | Abrir JaamSim | Inicia GUI Java apenas por escolha explícita; IA e StatFit são janelas internas |
-| 3 | Revisar CFG | Chama Python offline e escreve apenas os relatórios em `output/offline-review` |
-| 4 | Abrir relatórios | Abre somente uma pasta já existente |
-| 5 | MC-001 v0.50 | Só delega ao histórico após hash, sidecar e manifesto verificados |
-| 6 | Compilar JaamSim | Apenas no checkout de código, com JDK 25 e Ant, sem executar GUI ou testes |
-| 0 | Sair | Não encerra servidores alheios |
-
-Também há parâmetros para integração futura: `--help`, `--status`,
-`--jaamsim`, `--review "arquivo.cfg"`, `--reports`, `--mc001`, `--build`.
-Nenhuma dessas operações é chamada automaticamente durante a abertura
-padrão; usar parâmetros que iniciam programas exige uma ação deliberada.
-
-O launcher configura `JAAMSIM_ASSISTANT_ROOT` para a extensão empacotada
-e respeita `JAAMSIM_PYTHON` quando definido. A execução do Python não
-altera o CFG e o pipeline de sugestões permanece sob revisão humana.
-
-## Separação entre engenharia, teste e pesquisa
-
-**Não executado nesta etapa:** testes manuais em Windows, avaliação visual
-das janelas, inferência Granite, P004, Full45 ou experimentos confirmatórios.
-Compilação/CI do projeto podem continuar validando integridade estática do
-pacote sem qualquer aprovação de uso.
-
-**Não mesclar** o PR enquanto a aceitação das interfaces estiver pendente.
-Nenhuma geração ou reescrita de arquivos `.cfg` é permitida automaticamente.
+O estado e `CANDIDATE_ONLY / GUI_PENDING / P004_DENY /
+FULL45_NO_GO`. Por orientacao do usuario, nao executar testes
+manuais ainda, nao instalar no sistema principal automaticamente,
+nao mesclar PR e nao promover a release.
