@@ -8,6 +8,7 @@ if errorlevel 1 (
 )
 set "JAAM_ROOT=%CD%"
 set "JAAM_JAR=%JAAM_ROOT%\JaamSim2026-03.jar"
+if not exist "%JAAM_JAR%" if exist "%JAAM_ROOT%\build\jars\JaamSim2026-03.jar" set "JAAM_JAR=%JAAM_ROOT%\build\jars\JaamSim2026-03.jar"
 set "JAAM_REVIEW=%JAAM_ROOT%\extensions\academic-assistant\python\modulo_ia_offline.py"
 set "JAAM_OUTPUT=%JAAM_ROOT%\extensions\academic-assistant\output\offline-review"
 if not defined JAAM_LEGACY_DIR set "JAAM_LEGACY_DIR=%JAAM_ROOT%\legacy\MC001_v050"
@@ -22,6 +23,7 @@ if /I "%~1"=="--jaamsim" goto CLI_JAAMSIM
 if /I "%~1"=="--review" goto CLI_REVIEW
 if /I "%~1"=="--reports" goto CLI_REPORTS
 if /I "%~1"=="--mc001" goto CLI_LEGACY
+if /I "%~1"=="--build" goto CLI_BUILD
 echo [ERRO] Argumento desconhecido: %~1
 goto HELP_ERROR
 
@@ -35,6 +37,7 @@ echo   2          - Abrir JaamSim com Assistente IA e StatFit
 echo   3          - Revisar um arquivo CFG, somente offline
 echo   4          - Abrir pasta de relatorios
 echo   5          - MC-001 v0.50 preservado (modulo opcional)
+echo   6          - Compilar JaamSim com Ant (somente fonte)
 echo   0          - Sair
 echo ----------------------------------------------------------
 echo   P004: DENY ^| FULL45: NO-GO ^| Sem inferencia automatica
@@ -63,6 +66,10 @@ if "%JAAM_OPTION%"=="4" (
 )
 if "%JAAM_OPTION%"=="5" (
     call :OPEN_LEGACY
+    goto MENU_PAUSE
+)
+if "%JAAM_OPTION%"=="6" (
+    call :BUILD_JAAMSIM
     goto MENU_PAUSE
 )
 echo [AVISO] Opcao nao reconhecida.
@@ -98,8 +105,12 @@ exit /b %ERRORLEVEL%
 call :OPEN_LEGACY
 exit /b %ERRORLEVEL%
 
+:CLI_BUILD
+call :BUILD_JAAMSIM
+exit /b %ERRORLEVEL%
+
 :HELP
-echo Uso: RODAR_JAAM_AI_COMPLETO.cmd [--status ^| --jaamsim ^| --review "modelo.cfg" ^| --reports ^| --mc001]
+echo Uso: RODAR_JAAM_AI_COMPLETO.cmd [--status ^| --jaamsim ^| --review "modelo.cfg" ^| --reports ^| --mc001 ^| --build]
 echo Sem argumentos: menu interativo, com ENTER seguro em estado somente leitura.
 echo MC-001 antigo deve estar intacto na pasta legacy\MC001_v050
 echo ou em JAAM_LEGACY_DIR com o CMD original, seu .sha256 e manifesto.
@@ -131,6 +142,25 @@ if errorlevel 1 (
 )
 echo [JAAM-AI] Abrindo JaamSim. Esta acao nao inicia Granite nem P004.
 java -jar "%JAAM_JAR%"
+exit /b %ERRORLEVEL%
+
+:BUILD_JAAMSIM
+if not exist "%JAAM_ROOT%\build.xml" (
+    echo [INFO] Este pacote nao inclui fontes Java. Compile a partir do checkout GitHub.
+    exit /b 7
+)
+where java.exe >nul 2>nul
+if errorlevel 1 (
+    echo [ERRO] Java nao encontrado; compilacao exige JDK 25.
+    exit /b 4
+)
+where ant.bat >nul 2>nul
+if errorlevel 1 (
+    echo [ERRO] Apache Ant nao encontrado no PATH.
+    exit /b 4
+)
+echo [JAAM-AI] Compilacao solicitada explicitamente. Nenhum teste GUI sera iniciado.
+call ant -f "%JAAM_ROOT%\build.xml" clean jar
 exit /b %ERRORLEVEL%
 
 :REVIEW_CFG
