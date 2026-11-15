@@ -205,6 +205,44 @@ public final class OfflineRclReportContractTest {
 				.replace(absolute, escape(relative.toString())));
 		Files.delete(receiptFile);
 		expectHistoricalStatus(lookup, historyRoot, cfg, false, "unattested history");
+		// CMD reviews let the Python parser choose its normalized model ID;
+		// Java must import this same-CFG review without requiring its own GUI ID.
+		Path cmdRun = historyRoot.resolve("cmd_run");
+		Files.createDirectories(cmdRun);
+		Path cmdReport = cmdRun.resolve("demo_cli_id_offline_review.json");
+		Path cmdStatus = cmdRun.resolve("demo_cli_id_suggestions_status.json");
+		Path cmdReceipt = cmdRun.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+		Files.writeString(cmdReport, report(cfg, "demo_cli_id", false, false)
+				.replace(absolute, escape(relative.toString())));
+		Files.writeString(cmdStatus, statuses(cfg, "demo_cli_id")
+				.replace(absolute, escape(relative.toString())));
+		Files.writeString(cmdReceipt, receipt(cfg, sha256(cfg), sha256(cmdReport), true)
+				.replace("JAAMSIM_GUI_RCL", "CMD_CENTRAL"));
+		expectHistoricalStatus(lookup, historyRoot, cfg, true, "CMD parser model ID differs from Java GUI ID");
+
+		// More than one report per run must never lead to an arbitrary pick.
+		Path extraReport = cmdRun.resolve("other_offline_review.json");
+		Files.writeString(extraReport, report(cfg, "other", false, false));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "ambiguous multiple reports");
+		Files.delete(extraReport);
+		expectHistoricalStatus(lookup, historyRoot, cfg, true, "single report restored");
+
+		// A report can declare an unsafe ID; it must not be usable as a path.
+		Files.writeString(cmdReport, report(cfg, "..", false, false));
+		Files.writeString(cmdReceipt, receipt(cfg, sha256(cfg), sha256(cmdReport), true)
+				.replace("JAAMSIM_GUI_RCL", "CMD_CENTRAL"));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "unsafe report model ID");
+
+		Files.writeString(cmdReport, report(cfg, "demo_cli_id", false, false)
+				.replace(absolute, escape(relative.toString())));
+		Files.writeString(cmdReceipt, receipt(cfg, sha256(cfg), sha256(cmdReport), true)
+				.replace("JAAMSIM_GUI_RCL", "CMD_CENTRAL"));
+		Files.writeString(cmdStatus, statuses(cfg, "wrong_model"));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "CMD status model ID mismatch");
+
+		Files.writeString(cmdStatus, statuses(cfg, "demo_cli_id")
+				.replace(absolute, escape(relative.toString())));
+		expectHistoricalStatus(lookup, historyRoot, cfg, true, "CMD status restored");
 		// Both native windows must treat an explicit root as authoritative.
 		// The CFG is deliberately next to an alternate valid module: silent
 		// fallback would find it and incorrectly accept the invalid setting.
