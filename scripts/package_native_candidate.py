@@ -68,6 +68,20 @@ A opcao 7 historica continua offline e DENY: nunca autoriza P004 ou Full45.
 
 
 
+
+LINUX = """#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")"
+export JAAMSIM_ASSISTANT_ROOT="$PWD/extensions/academic-assistant"
+if [ -z "$(printenv JAAMSIM_PYTHON 2>/dev/null || true)" ]; then
+  export JAAMSIM_PYTHON=python3
+fi
+echo "JAAM-AI - candidato sem aceite GUI"
+java -version
+exec java -jar "JaamSim2026-03.jar"
+"""
+
+
 def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
