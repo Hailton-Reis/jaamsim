@@ -197,3 +197,66 @@ Os hashes protegem verificacao de conteudo, mas nao comprovam
 correcao conceitual de um modelo ou execucao valida do simulador.
 Nenhum teste manual de Windows, GUI, P004 ou Full45 foi executado.
 O CMD ativo no Drive/Windows nao foi substituido; PR continua draft.
+
+
+## v0.57 — histórico RCL consultável e correção do Python no CMD original
+
+**Estado:** candidata privada `CANDIDATE_ONLY / GUI_PENDING / P004_DENY /
+FULL45_NO_GO`. O único ponto de entrada Windows continua
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, com todas as opções
+1–11 preservadas e atalho **inalterado**.
+
+### Interface nativa JaamSim (código público)
+
+Em `src/main/java/com/jaamsim/ui/AIAssistantBox.java` foi incluído
+o botão **Histórico RCL**, que pode ser acionado também pela mensagem
+"mostrar histórico de revisões". A consulta é **somente leitura**
+(não invoca Python, redes, simulações ou LLM). Exibe até 10 registros,
+ordenados pelas pastas existentes, com:
+- identificação da revisão e resultado local do recibo;
+- origem (janela JaamSim ou CMD) e data UTC declarada;
+- modelo selecionado e pasta de resultados;
+- comparação do SHA-256 do CFG atual com o hash registrado em cada revisão,
+  distinguindo `mesmo conteúdo atual` de `outra versão / não verificável`.
+
+Quando há um arquivo CFG aberto, não apresenta recibos de outros modelos
+na lista. Quando nenhum CFG está salvo, permite consultar os registros
+locais de todos os modelos. Recibos malformados ou com esquema inesperado
+não são tratados como evidência válida. Os recibos são registros locais,
+**não assinaturas digitais**. A política de importação de sugestões por
+caminho + hash permanece distinta e continua restritiva.
+
+### CMD privado v0.57
+
+Foi corrigido o defeito de `Resolve-JaamPython` que usava
+`$name.Contains('')`: esse teste é sempre verdadeiro e impedia
+resolver `JAAMSIM_PYTHON=python.exe` pelo PATH. A nova comparação
+usa `$name.Contains([char]92)`, distinguindo executáveis por nome
+de caminhos relativos como `.venv\\Scripts\\python.exe`.
+Nenhuma condição para P004 ou Full45 foi modificada.
+
+O módulo nativo distribuído pelo CI público é recolocado sob
+`JAAM_AI_NATIVE/`, sem distribuir segundo CMD. O controlador fixa o
+SHA-256 do manifesto nativo.
+
+### Identificação de artefatos
+
+- CMD v0.57 (2.145.091 bytes): SHA-256
+  `814d984a3470a788efe3b48ab29fc9c3fab5bbd05769abb399f2fc3af0be9e54`.
+- Manifesto nativo `MANIFEST_SHA256.json`: SHA-256
+  `3765340322c8a89180a72963e43d0fe53709903c34c76fe0d29888f7e3907a3e`,
+  37/37 arquivos conferidos.
+- Candidata privada:
+  `JAAM_AI_V057_CMD_ORIGINAL_HISTORICO_RCL_CONSULTAVEL_2026-11-14.zip`.
+  SHA-256 `e8a0663a3ece9e25629cf27bf3fde618df11bf21497a44d5cf10e38e33130e09`,
+  63 entradas, sem nomes duplicados.
+- Backups íntegros das versões v0.50–v0.56, preservando a integridade
+  de todos os blocos históricos incorporados ao CMD.
+- [Compilação Java/empacotamento](https://github.com/Hailton-Reis/jaamsim/actions/runs/43667426575)
+  **aprovados** e
+  [regressões Python](https://github.com/Hailton-Reis/jaamsim/actions/runs/43667426615)
+  **aprovadas** na branch isolada.
+
+**Não realizado:** instalação no Windows, substituição do CMD ativo no Drive,
+teste manual/visual da GUI, execução do controlador histórico, experimento
+P004/Full45 ou mesclagem do PR.
