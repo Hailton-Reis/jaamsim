@@ -8,6 +8,8 @@
 package com.jaamsim.ui;
 
 import java.lang.reflect.Method;
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -54,6 +56,30 @@ public final class OfflineRclReportContractTest {
 		String failure = validate(verifier, report, cfg, assistantRoot);
 		if (failure == null || failure.trim().isEmpty())
 			throw new AssertionError("Invalid or unrelated RCL report accepted");
+		checks++;
+	}
+
+
+	private static String sha256(Path file) throws Exception {
+		return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+				.digest(Files.readAllBytes(file)));
+	}
+
+	private static String receipt(Path cfg, String cfgSha, String reportSha, boolean unchanged) {
+		return "{\"schema\":\"jaam.ai.offline_review.receipt.v1\","
+				+ "\"source_cfg\":\"" + escape(cfg.toAbsolutePath().normalize().toString())
+				+ "\",\"cfg_sha256_after\":\"" + cfgSha
+				+ "\",\"cfg_unchanged\":" + unchanged
+				+ ",\"outcome\":\"COMPLETE_OFFLINE\","
+				+ "\"origin\":\"JAAMSIM_GUI_RCL\","
+				+ "\"report_sha256\":\"" + reportSha + "\"}";
+	}
+
+	private static void expectHistoricalStatus(Method lookup, Path outputRoot, Path cfg,
+			boolean expected, String context) throws Exception {
+		Path found = (Path) lookup.invoke(null, outputRoot, cfg, sha256(cfg));
+		if ((found != null) != expected)
+			throw new AssertionError(context + ": expected reuse=" + expected + ", found=" + found);
 		checks++;
 	}
 
@@ -118,6 +144,44 @@ public final class OfflineRclReportContractTest {
 		Files.writeString(status, "{not valid JSON}");
 		expectBlocked(verifier, report, cfg, assistantRoot);
 
+		// Decision import is a separate risk: verify the entire receipt + status
+		// chain for the same CFG before carrying an old operator decision forward.
+		Method lookup = AIAssistantBox.class.getDeclaredMethod("findSuggestionStatusFile",
+				Path.class, Path.class, String.class);
+		lookup.setAccessible(true);
+		Path historyRoot = run.getParent();
+		Path receiptFile = run.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+		Files.writeString(report, report(cfg, "demo", false, false)
+				.replace(absolute, escape(relative.toString())));
+		Files.writeString(status, statuses(cfg, "demo")
+				.replace(absolute, escape(relative.toString())));
+		Files.writeString(receiptFile, receipt(cfg, sha256(cfg), sha256(report), true));
+		expectHistoricalStatus(lookup, historyRoot, cfg, true, "same model + hash + relative source");
+
+		Files.writeString(receiptFile, receipt(cfg, "old-hash", sha256(report), true));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "changed model hash");
+
+		Files.writeString(receiptFile, receipt(cfg, sha256(cfg), sha256(report), false));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "CFG changed during review");
+
+		Files.writeString(receiptFile, receipt(cfg, sha256(cfg), sha256(report), true));
+		Files.writeString(report, report(otherCfg, "demo", false, false));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "report belongs to another source");
+
+		Files.writeString(report, report(cfg, "demo", false, false)
+				.replace(absolute, escape(relative.toString())));
+		// Hash from the original version of the report is no longer valid.
+		Files.writeString(receiptFile, receipt(cfg, sha256(cfg), "tampered-report", true));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "report hash pin mismatch");
+
+		Files.writeString(receiptFile, receipt(cfg, sha256(cfg), sha256(report), true));
+		Files.writeString(status, statuses(otherCfg, "demo"));
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "status belongs to another model");
+
+		Files.writeString(status, statuses(cfg, "demo")
+				.replace(absolute, escape(relative.toString())));
+		Files.delete(receiptFile);
+		expectHistoricalStatus(lookup, historyRoot, cfg, false, "unattested history");
 		System.out.println("RCL_REPORT_PROVENANCE_CONTRACT_OK " + checks);
 	}
 }
