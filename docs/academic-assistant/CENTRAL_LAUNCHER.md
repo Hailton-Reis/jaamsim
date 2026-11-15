@@ -125,7 +125,7 @@ e a entrada do atalho permanecem. Em relacao a v0.54:
 - Backups independentes **v0.50-v0.54**, preservados por hash.
   O CMD candidato v0.55 tem SHA-256
   `a833c9876cde2960d342d818104190c400e4bfdfef020c1bf19ab2b296b37421`,
-  2.143.865 bytes (ver manifesto privado para tamanho exato).
+  2.143.856 bytes (confirmados pelo manifesto e pelo artefato).
   O ZIP candidato tem **57 entradas** e SHA-256
   `ffe2daf4f7b99e147d192e2c25f490499ad375fad589f1bdd45c66bac259e39b`.
 
