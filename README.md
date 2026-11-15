@@ -19,18 +19,22 @@ Simulation software can execute a syntactically valid model while conceptual omi
 
 The prototype can inspect a structured model snapshot and report conditions such as disconnected flow, queue or process endpoints, unused resources, missing metrics, undocumented decision rules, and insufficient model structure. Every finding identifies the deterministic rule that produced it.
 
-## Central launcher (development candidate)
+## Central Windows launcher (existing shortcut preserved)
 
-On Windows, use the repository's `RODAR_JAAM_AI_COMPLETO.cmd` as the single
-entry point for status, opening JaamSim, offline CFG review, existing report
-folders and an explicitly requested local build. The previously distributed
-MC-001 v0.50 monolithic CMD remains **unmodified** and can be delegated to
-only after SHA-256, sidecar and manifest validation; it is not silently bundled
-into this public repository.
+The **original** `RODAR_JAAM_AI_COMPLETO.cmd` belongs to the private
+`00_PROJETO_ATUAL` workspace on Google Drive. It has a pinned, historic
+v0.50 version and a staged v0.51 candidate that extends the **same file**
+with menu options 8-11 (native JaamSim, offline CFG review, report folder,
+module status). Existing MC-001 options 1-7 and P004/Full45 DENY restrictions
+remain in the central CMD. The user’s existing shortcut stays pointed at
+the same path after the private candidate is installed.
 
-The default Enter action is passive status-only. It does not start an LLM,
-send a network request or run a test. Details and compatibility requirements:
-[central launcher design](docs/academic-assistant/CENTRAL_LAUNCHER.md).
+**This public repository intentionally does not contain or replace that
+2.1 MB self-contained historic launcher.** Its build artifact is only the
+`JAAM_AI_NATIVE` Java/Python module to place beside the main CMD.
+No alternate Windows launcher is created.
+
+More details: [central integration](docs/academic-assistant/CENTRAL_LAUNCHER.md).
 
 ## Architecture
 
