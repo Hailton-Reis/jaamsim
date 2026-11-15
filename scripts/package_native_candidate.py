@@ -34,6 +34,7 @@ ENTER/1 - Estado passivo; nao inicia servidores, testes ou inferencia.
 3       - Revisar .cfg somente offline, gerando relatorios.
 4       - Abrir relatorios existentes.
 5       - Entrar no modulo MC-001 v0.50 original, se instalado separadamente.
+6       - Compilar JaamSim com Ant no checkout de codigo (indisponivel no ZIP).
 0       - Sair.
 
 O modulo v0.50 original exige seus 3 arquivos imutaveis, na pasta:
