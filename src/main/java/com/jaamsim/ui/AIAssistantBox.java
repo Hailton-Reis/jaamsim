@@ -1841,14 +1841,26 @@ public class AIAssistantBox extends FrameBox {
 						+ "CFG não pôde ser conferido após a revisão";
 			}
 			boolean unchanged = beforeSha.equals(afterSha);
-			boolean validReport = Files.isRegularFile(outputDir.resolve(modelId + "_offline_review.json"));
+			Path reportFile = outputDir.resolve(modelId + "_offline_review.json");
+			String reportError = validateOfflineRclReport(reportFile, cfgFile.toPath(), modelId, assistantRoot);
+			boolean validReport = reportError == null;
+			String reportSha = null;
+			if (validReport) {
+				try {
+					reportSha = sha256File(reportFile);
+				}
+				catch (IOException ex) {
+					validReport = false;
+					reportError = "não foi possível calcular SHA-256 do JSON de revisão";
+				}
+			}
 			boolean complete = result != null && result.finished && result.exitCode == 0
 					&& unchanged && validReport;
 
 			// The receipt is written even when Python fails or reaches the time limit.
 			// A missing receipt is an error, never a successful review.
-			writeRclReceipt(outputDir, cfgFile.toPath(), modelId, beforeSha, afterSha, result,
-					errorText, complete);
+			writeRclReceipt(outputDir, cfgFile.toPath(), modelId, beforeSha, afterSha, reportSha,
+					result, errorText, complete);
 
 			StringBuilder sb = new StringBuilder();
 			sb.append("Assistente: revisão ").append(complete ? "OFFLINE_CONCLUIDA" : "FALHOU_OU_BLOQUEADA")
@@ -1862,7 +1874,8 @@ public class AIAssistantBox extends FrameBox {
 				sb.append("BLOQUEADO: CFG modificado ou não verificável. Não houve restauração automática.")
 						.append(System.lineSeparator());
 			if (!validReport)
-				sb.append("BLOQUEADO: relatório JSON esperado não foi produzido.").append(System.lineSeparator());
+				sb.append("BLOQUEADO: relatório JSON inválido ou de outro modelo: ")
+						.append(reportError).append(System.lineSeparator());
 			if (errorText != null)
 				sb.append("Erro técnico: ").append(errorText).append(System.lineSeparator());
 			if (result != null) {
@@ -2227,6 +2240,23 @@ public class AIAssistantBox extends FrameBox {
 					String outcome = getStringChild(receipt, "outcome", "");
 					if (!"COMPLETE_OFFLINE".equals(outcome) && !"COMPLETED_OFFLINE".equals(outcome))
 						continue;
+					// A complete receipt must correspond to a real, well-formed
+					// report for this exact model and CFG path.
+					Path candidateReport = run.resolve(buildModelId(cfgFile.toFile()) + "_offline_review.json");
+					Path assistantRoot = reportRoot.getParent().getParent();
+					if (validateOfflineRclReport(candidateReport, cfgFile,
+							buildModelId(cfgFile.toFile()), assistantRoot) != null)
+						continue;
+					String pinnedReportSha = getStringChild(receipt, "report_sha256", "");
+					String origin = getStringChild(receipt, "origin", "");
+					if (pinnedReportSha.isEmpty()) {
+						// Historical CMD receipts did not yet pin report hashes.
+						// New GUI receipts must always pin them to be reusable.
+						if ("JAAMSIM_GUI_RCL".equals(origin))
+							continue;
+					}
+					else if (!pinnedReportSha.equalsIgnoreCase(sha256File(candidateReport)))
+						continue;
 				}
 				catch (Exception ex) {
 					continue; // malformed or partial receipts cannot authorize importing decisions
@@ -2265,6 +2295,78 @@ public class AIAssistantBox extends FrameBox {
 		return newest;
 	}
 
+	/**
+	 * Validate the RCL JSON rather than treating file existence as proof of
+	 * a successful review. A forged or stale JSON for another CFG is not a
+	 * successful result, even if the subprocess exits with code zero.
+	 * Returns null on success or a user-readable reason for rejection.
+	 */
+	private static String validateOfflineRclReport(Path reportFile, Path cfgFile, String modelId,
+			Path assistantRoot) {
+		if (!Files.isRegularFile(reportFile, LinkOption.NOFOLLOW_LINKS))
+			return "arquivo de revisão ausente";
+		try {
+			JSONValue report = readJsonFile(reportFile);
+			if (report == null || !report.isMap())
+				return "estrutura JSON inválida";
+			if (!"offline_deterministico".equals(getStringChild(report, "mode", "")))
+				return "revisão não é determinística offline";
+			if (!"cfg".equals(getStringChild(report, "input_type", "")))
+				return "relatório não foi gerado a partir de CFG";
+
+			Path recorded = resolveReportedSource(getStringChild(report, "input_file", ""), assistantRoot);
+			if (recorded == null || !cfgFile.toAbsolutePath().normalize().equals(recorded))
+				return "origem do CFG não corresponde ao modelo selecionado";
+
+			JSONValue analysis = getMapChild(report, "analysis");
+			if (!modelId.equals(getStringChild(analysis, "model_id", "")))
+				return "identificador do modelo é diferente";
+
+			JSONValue usage = getMapChild(report, "ai_usage");
+			if (!isFalseFlag(usage, "internet_api")
+					|| !isFalseFlag(usage, "llm_online")
+					|| !isFalseFlag(usage, "local_ai"))
+				return "modo offline sem IA não foi comprovado";
+			JSONValue llmAssist = getMapChild(report, "llm_online_assist");
+			if (!isFalseFlag(llmAssist, "enabled"))
+				return "relatório registra camada LLM habilitada";
+
+			Path statusFile = reportFile.getParent().resolve(modelId + "_suggestions_status.json");
+			if (!Files.isRegularFile(statusFile, LinkOption.NOFOLLOW_LINKS))
+				return "arquivo de status da mesma revisão não encontrado";
+			JSONValue statuses = readJsonFile(statusFile);
+			if (!modelId.equals(getStringChild(statuses, "model_id", "")))
+				return "arquivo de status pertence a outro modelo";
+			Path statusSource = resolveReportedSource(getStringChild(statuses, "input_file", ""), assistantRoot);
+			if (statusSource == null || !recorded.equals(statusSource))
+				return "origem do arquivo de status não corresponde ao relatório";
+			if (getMapChild(statuses, "suggestions") == null
+					|| !getMapChild(statuses, "suggestions").isList())
+				return "arquivo de status sem lista de sugestões";
+			return null;
+		}
+		catch (Exception ex) {
+			return "arquivo JSON não pôde ser validado: " + ex.getClass().getSimpleName();
+		}
+	}
+
+	private static boolean isFalseFlag(JSONValue parent, String key) {
+		JSONValue value = getMapChild(parent, key);
+		return value != null && value.isFalse();
+	}
+
+	private static Path resolveReportedSource(String raw, Path assistantRoot) {
+		if (raw == null || raw.trim().isEmpty())
+			return null;
+		Path recorded = Paths.get(raw);
+		if (!recorded.isAbsolute()) {
+			// Python records paths relative to the JaamSim repository root.
+			Path repositoryRoot = assistantRoot.getParent().getParent();
+			recorded = repositoryRoot.resolve(recorded);
+		}
+		return recorded.toAbsolutePath().normalize();
+	}
+
 	private static String sha256File(Path file) throws IOException {
 		MessageDigest md;
 		try {
@@ -2286,7 +2388,8 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static void writeRclReceipt(Path outputDir, Path cfgFile, String modelId,
-			String beforeSha, String afterSha, RclRunResult result, String error, boolean complete)
+			String beforeSha, String afterSha, String reportSha,
+			RclRunResult result, String error, boolean complete)
 			throws IOException {
 		JSONValue receipt = JSONValue.makeObject();
 		receipt.mapVal.put("schema", JSONValue.makeStringVal("jaam.ai.offline_review.receipt.v1"));
@@ -2299,6 +2402,8 @@ public class AIAssistantBox extends FrameBox {
 				? JSONValue.makeNullVal() : JSONValue.makeStringVal(afterSha));
 		receipt.mapVal.put("cfg_unchanged", beforeSha.equals(afterSha)
 				? JSONValue.makeTrueVal() : JSONValue.makeFalseVal());
+		receipt.mapVal.put("report_sha256", reportSha == null
+				? JSONValue.makeNullVal() : JSONValue.makeStringVal(reportSha));
 		receipt.mapVal.put("exit_code", JSONValue.makeNumVal(result == null ? -1 : result.exitCode));
 		receipt.mapVal.put("outcome", JSONValue.makeStringVal(complete ? "COMPLETE_OFFLINE" : "FAILED_OR_BLOCKED"));
 		receipt.mapVal.put("finished", result != null && result.finished
