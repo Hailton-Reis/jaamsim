@@ -39,19 +39,25 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.text.Normalizer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -1767,66 +1773,97 @@ public class AIAssistantBox extends FrameBox {
 	private void runLocalRclWorker() {
 		try {
 			JaamSimModel simModel = GUIFrame.getJaamSimModel();
-			if (simModel == null) {
-				appendStatusText("Assistente: não encontrei modelo ativo." + System.lineSeparator());
+			if (simModel == null || simModel.getConfigFile() == null) {
+				appendStatusText("Assistente: salve o modelo como .cfg antes da revisão." + System.lineSeparator());
 				return;
 			}
-
 			File cfgFile = simModel.getConfigFile();
-			if (cfgFile == null) {
-				appendStatusText("Assistente: salve o modelo como .cfg antes de rodar a revisão." + System.lineSeparator());
-				return;
-			}
 			if (!cfgFile.isFile()) {
-				appendStatusText("Assistente: arquivo de configuração não encontrado: "
-						+ cfgFile.getAbsolutePath() + System.lineSeparator());
+				appendStatusText("Assistente: CFG não encontrado: " + cfgFile.getAbsolutePath() + System.lineSeparator());
 				return;
 			}
 
 			Path assistantRoot = findAssistantRoot(cfgFile);
 			if (assistantRoot == null) {
-				appendStatusText("Assistente: não encontrei a pasta da extensao academica." + System.lineSeparator()
-						+ "Configure JAAMSIM_ASSISTANT_ROOT ou jaamsim.assistant.root apontando para extensions/academic-assistant." + System.lineSeparator());
+				appendStatusText("Assistente: raiz da extensão não encontrada. Configure JAAMSIM_ASSISTANT_ROOT."
+						+ System.lineSeparator());
 				return;
 			}
 
 			Path script = assistantRoot.resolve("python").resolve("modulo_ia_offline.py");
-			Path outputDir = assistantRoot.resolve("output")
-					.resolve("offline-review")
-					.resolve("native_rcl");
+			if (!Files.isRegularFile(script)) {
+				appendStatusText("Assistente: motor RCL não encontrado: " + script + System.lineSeparator());
+				return;
+			}
 			String modelId = buildModelId(cfgFile);
-			Path statusFile = outputDir.resolve(modelId + "_suggestions_status.json");
-			List<String> command = buildRclCommand(cfgFile, script, outputDir, modelId, statusFile);
-
-			appendStatusText("Assistente: vou revisar o modelo salvo e te mostrar os principais achados." + System.lineSeparator());
-			if (Files.isRegularFile(statusFile)) {
-				appendStatusText("Assistente: também vou respeitar decisões de sugestões já registradas." + System.lineSeparator());
+			Path outputRoot = getRclOutputRoot(assistantRoot);
+			// Import only decisions tied to the SAME physical CFG and SAME content hash.
+			String beforeSha = sha256File(cfgFile.toPath());
+			Path priorStatus = findSuggestionStatusFile(outputRoot, cfgFile.toPath(), beforeSha);
+			Path outputDir = createRclOutputDir(outputRoot);
+			List<String> command = buildRclCommand(cfgFile, script, outputDir, modelId, priorStatus);
+			appendStatusText("Assistente: revisão offline em pasta exclusiva: " + outputDir.toAbsolutePath()
+					+ System.lineSeparator());
+			if (priorStatus != null) {
+				appendStatusText("Assistente: decisões anteriores do mesmo CFG e conteúdo serão consideradas."
+						+ System.lineSeparator());
 			}
 
-			RclRunResult result = executeCommand(command, assistantRoot, RCL_TIMEOUT_SECONDS);
+			RclRunResult result = null;
+			String errorText = null;
+			try {
+				result = executeCommand(command, assistantRoot, RCL_TIMEOUT_SECONDS);
+			}
+			catch (Exception ex) {
+				errorText = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+			}
+
+			String afterSha = null;
+			try {
+				afterSha = sha256File(cfgFile.toPath());
+			}
+			catch (IOException ex) {
+				errorText = (errorText == null ? "" : errorText + "; ")
+						+ "CFG não pôde ser conferido após a revisão";
+			}
+			boolean unchanged = beforeSha.equals(afterSha);
+			boolean validReport = Files.isRegularFile(outputDir.resolve(modelId + "_offline_review.json"));
+			boolean complete = result != null && result.finished && result.exitCode == 0
+					&& unchanged && validReport;
+
+			// The receipt is written even when Python fails or reaches the time limit.
+			// A missing receipt is an error, never a successful review.
+			writeRclReceipt(outputDir, cfgFile.toPath(), modelId, beforeSha, afterSha, result,
+					errorText, complete);
+
 			StringBuilder sb = new StringBuilder();
-			sb.append("Assistente: revisão finalizada=");
-			sb.append(result.finished);
-			sb.append(", código=");
-			sb.append(result.exitCode);
-			sb.append(System.lineSeparator());
-			if (!result.finished) {
-				sb.append("Assistente: tempo limite após ");
-				sb.append(RCL_TIMEOUT_SECONDS);
-				sb.append(" segundos. O processo foi interrompido.");
-				sb.append(System.lineSeparator());
-			}
-			if (result.output.trim().isEmpty()) {
-				sb.append("Saída da revisão: vazia").append(System.lineSeparator());
-			}
-			else {
-				sb.append("Saída da revisão:").append(System.lineSeparator());
-				sb.append(limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS)).append(System.lineSeparator());
+			sb.append("Assistente: revisão ").append(complete ? "OFFLINE_CONCLUIDA" : "FALHOU_OU_BLOQUEADA")
+					.append(System.lineSeparator());
+			sb.append("Sessão: ").append(outputDir.getFileName()).append(System.lineSeparator());
+			sb.append("Resultados: ").append(outputDir.toAbsolutePath()).append(System.lineSeparator());
+			sb.append("CFG SHA-256 antes: ").append(beforeSha).append(System.lineSeparator());
+			sb.append("CFG SHA-256 depois: ").append(afterSha == null ? "indisponível" : afterSha)
+					.append(System.lineSeparator());
+			if (!unchanged)
+				sb.append("BLOQUEADO: CFG modificado ou não verificável. Não houve restauração automática.")
+						.append(System.lineSeparator());
+			if (!validReport)
+				sb.append("BLOQUEADO: relatório JSON esperado não foi produzido.").append(System.lineSeparator());
+			if (errorText != null)
+				sb.append("Erro técnico: ").append(errorText).append(System.lineSeparator());
+			if (result != null) {
+				sb.append("Processo concluído=").append(result.finished)
+						.append(", código=").append(result.exitCode).append(System.lineSeparator());
+				if (!result.output.trim().isEmpty()) {
+					sb.append("Saída da revisão:").append(System.lineSeparator());
+					sb.append(limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS))
+							.append(System.lineSeparator());
+				}
 			}
 			appendStatusText(sb.toString());
 		}
 		catch (Exception ex) {
-		appendStatusText("Erro na revisão local: " + ex.getClass().getSimpleName()
+			appendStatusText("Erro na revisão local: " + ex.getClass().getSimpleName()
 					+ ": " + ex.getMessage() + System.lineSeparator());
 		}
 	}
@@ -1845,10 +1882,8 @@ public class AIAssistantBox extends FrameBox {
 				return;
 			}
 
-			Path outputDir = assistantRoot.resolve("output")
-					.resolve("offline-review")
-					.resolve("native_rcl");
-			openFolder(outputDir, "Abrir resultados da revisão");
+			Path outputDir = getRclOutputRoot(assistantRoot);
+			openFolder(outputDir, "Abrir histórico de revisões offline");
 		}
 		catch (Exception ex) {
 			appendStatusText(System.lineSeparator()
@@ -1985,54 +2020,148 @@ public class AIAssistantBox extends FrameBox {
 
 	private SuggestionFileContext findSuggestionFileContext() throws IOException {
 		JaamSimModel simModel = GUIFrame.getJaamSimModel();
-		File anchorFile = new File(".");
-		String modelId = null;
-		if (simModel != null && simModel.getConfigFile() != null) {
-			anchorFile = simModel.getConfigFile();
-			modelId = buildModelId(anchorFile);
+		File anchorFile = simModel == null ? null : simModel.getConfigFile();
+		if (anchorFile == null || !anchorFile.isFile()) {
+			appendStatusText("Assistente: salve o CFG para recuperar decisões do modelo correto."
+					+ System.lineSeparator());
+			return null;
 		}
-
 		Path assistantRoot = findAssistantRoot(anchorFile);
 		if (assistantRoot == null) {
-			appendStatusText(System.lineSeparator()
-					+ "Assistente: raiz da extensao não encontrada. Configure JAAMSIM_ASSISTANT_ROOT." + System.lineSeparator());
+			appendStatusText("Assistente: raiz da extensão não encontrada. Configure JAAMSIM_ASSISTANT_ROOT."
+					+ System.lineSeparator());
 			return null;
 		}
-
-		Path outputDir = assistantRoot.resolve("output")
-				.resolve("offline-review")
-				.resolve("native_rcl");
-		Path statusFile = findSuggestionStatusFile(outputDir, modelId);
-		return new SuggestionFileContext(outputDir, statusFile);
+		Path reportRoot = getRclOutputRoot(assistantRoot);
+		Path status = findSuggestionStatusFile(reportRoot, anchorFile.toPath(),
+				sha256File(anchorFile.toPath()));
+		return new SuggestionFileContext(reportRoot, status);
 	}
 
-	private static Path findSuggestionStatusFile(Path outputDir, String preferredModelId) throws IOException {
-		if (preferredModelId != null) {
-			Path preferred = outputDir.resolve(preferredModelId + "_suggestions_status.json");
-			if (Files.isRegularFile(preferred))
-				return preferred;
-		}
-		if (!Files.isDirectory(outputDir))
+	private static Path getRclOutputRoot(Path assistantRoot) {
+		return assistantRoot.resolve("output").resolve("offline-review");
+	}
+
+	private static Path createRclOutputDir(Path root) throws IOException {
+		Files.createDirectories(root);
+		String utc = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS")
+				.withZone(ZoneOffset.UTC).format(java.time.Instant.now());
+		return Files.createDirectory(root.resolve("gui_" + utc + "_"
+				+ UUID.randomUUID().toString().replace("-", "").substring(0, 12)));
+	}
+
+	/**
+	 * A status is reusable only for the exact source path and CFG content.
+	 * The historical native_rcl flat folder has no authenticated provenance,
+	 * so it is intentionally NOT imported to avoid cross-model decisions.
+	 */
+	private static Path findSuggestionStatusFile(Path reportRoot, Path cfgFile, String cfgSha)
+			throws IOException {
+		if (!Files.isDirectory(reportRoot))
 			return null;
-
-		Path latest = null;
-		FileTime latestTime = null;
-		try (java.util.stream.Stream<Path> paths = Files.list(outputDir)) {
-			for (Path path : (Iterable<Path>) paths::iterator) {
-				if (!Files.isRegularFile(path))
+		Path source = cfgFile.toAbsolutePath().normalize();
+		Path newest = null;
+		FileTime newestTime = null;
+		try (java.util.stream.Stream<Path> runs = Files.list(reportRoot)) {
+			for (Path run : (Iterable<Path>) runs::iterator) {
+				if (!Files.isDirectory(run, LinkOption.NOFOLLOW_LINKS))
 					continue;
-				String fileName = path.getFileName().toString();
-				if (!fileName.endsWith("_suggestions_status.json"))
+				Path receiptFile = run.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+				if (!Files.isRegularFile(receiptFile, LinkOption.NOFOLLOW_LINKS))
 					continue;
-
-				FileTime modified = Files.getLastModifiedTime(path);
-				if (latest == null || modified.compareTo(latestTime) > 0) {
-					latest = path;
-					latestTime = modified;
+				try {
+					JSONValue receipt = readJsonFile(receiptFile);
+					String recorded = getStringChild(receipt, "source_cfg", "");
+					String recordedSha = getStringChild(receipt, "cfg_sha256_after", "");
+					JSONValue unchanged = getMapChild(receipt, "cfg_unchanged");
+					if (recorded.isEmpty() || !source.equals(Paths.get(recorded).toAbsolutePath().normalize())
+							|| !cfgSha.equalsIgnoreCase(recordedSha)
+							|| unchanged == null || !unchanged.isTrue())
+						continue;
+					// The receipt is not a signature; limit cross-run reuse to completed analyses.
+					String outcome = getStringChild(receipt, "outcome", "");
+					if (!"COMPLETE_OFFLINE".equals(outcome) && !"COMPLETED_OFFLINE".equals(outcome))
+						continue;
+				}
+				catch (Exception ex) {
+					continue; // malformed or partial receipts cannot authorize importing decisions
+				}
+				try (java.util.stream.Stream<Path> statuses = Files.list(run)) {
+					for (Path file : (Iterable<Path>) statuses::iterator) {
+						if (!Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)
+								|| !file.getFileName().toString().endsWith("_suggestions_status.json"))
+							continue;
+						try {
+							JSONValue statusJson = readJsonFile(file);
+							String input = getStringChild(statusJson, "input_file", "");
+							if (input.isEmpty() || !source.equals(Paths.get(input).toAbsolutePath().normalize()))
+								continue;
+							FileTime modified = Files.getLastModifiedTime(file);
+							if (newest == null || modified.compareTo(newestTime) > 0) {
+								newest = file;
+								newestTime = modified;
+							}
+						}
+						catch (Exception ex) {
+							// Ignore a corrupted or unrelated status, not the entire run.
+						}
+					}
 				}
 			}
 		}
-		return latest;
+		return newest;
+	}
+
+	private static String sha256File(Path file) throws IOException {
+		MessageDigest md;
+		try {
+			md = MessageDigest.getInstance("SHA-256");
+		}
+		catch (NoSuchAlgorithmException ex) {
+			throw new IOException("SHA-256 não disponível", ex);
+		}
+		try (java.io.InputStream in = Files.newInputStream(file)) {
+			byte[] buf = new byte[32768];
+			int count;
+			while ((count = in.read(buf)) != -1)
+				md.update(buf, 0, count);
+		}
+		StringBuilder hash = new StringBuilder();
+		for (byte b : md.digest())
+			hash.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+		return hash.toString();
+	}
+
+	private static void writeRclReceipt(Path outputDir, Path cfgFile, String modelId,
+			String beforeSha, String afterSha, RclRunResult result, String error, boolean complete)
+			throws IOException {
+		JSONValue receipt = JSONValue.makeObject();
+		receipt.mapVal.put("schema", JSONValue.makeStringVal("jaam.ai.offline_review.receipt.v1"));
+		receipt.mapVal.put("run_id", JSONValue.makeStringVal(outputDir.getFileName().toString()));
+		receipt.mapVal.put("utc_timestamp", JSONValue.makeStringVal(OffsetDateTime.now(ZoneOffset.UTC).toString()));
+		receipt.mapVal.put("source_cfg", JSONValue.makeStringVal(cfgFile.toAbsolutePath().normalize().toString()));
+		receipt.mapVal.put("model_id", JSONValue.makeStringVal(modelId));
+		receipt.mapVal.put("cfg_sha256_before", JSONValue.makeStringVal(beforeSha));
+		receipt.mapVal.put("cfg_sha256_after", afterSha == null
+				? JSONValue.makeNullVal() : JSONValue.makeStringVal(afterSha));
+		receipt.mapVal.put("cfg_unchanged", beforeSha.equals(afterSha)
+				? JSONValue.makeTrueVal() : JSONValue.makeFalseVal());
+		receipt.mapVal.put("exit_code", JSONValue.makeNumVal(result == null ? -1 : result.exitCode));
+		receipt.mapVal.put("outcome", JSONValue.makeStringVal(complete ? "COMPLETE_OFFLINE" : "FAILED_OR_BLOCKED"));
+		receipt.mapVal.put("finished", result != null && result.finished
+				? JSONValue.makeTrueVal() : JSONValue.makeFalseVal());
+		receipt.mapVal.put("output_directory", JSONValue.makeStringVal(outputDir.toAbsolutePath().toString()));
+		receipt.mapVal.put("origin", JSONValue.makeStringVal("JAAMSIM_GUI_RCL"));
+		receipt.mapVal.put("error", error == null ? JSONValue.makeNullVal() : JSONValue.makeStringVal(error));
+		receipt.mapVal.put("automatic_model_changes", JSONValue.makeFalseVal());
+		receipt.mapVal.put("external_llm_invoked", JSONValue.makeFalseVal());
+		receipt.mapVal.put("p004_inference_authorized", JSONValue.makeFalseVal());
+		receipt.mapVal.put("full45_authorized", JSONValue.makeFalseVal());
+		Path target = outputDir.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+		Path temporary = outputDir.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json.tmp");
+		Files.write(temporary, (JSONWriter.writeJSONValue(receipt) + System.lineSeparator())
+				.getBytes(StandardCharsets.UTF_8));
+		Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
 	}
 
 	private static String buildSuggestionSummary(Path statusFile) throws Exception {
@@ -2719,7 +2848,7 @@ public class AIAssistantBox extends FrameBox {
 		command.add("jaamsim-gui");
 		command.add("--profile");
 		command.add("beginner");
-		if (Files.isRegularFile(statusFile)) {
+		if (statusFile != null && Files.isRegularFile(statusFile)) {
 			command.add("--status-file");
 			command.add(statusFile.toString());
 		}
