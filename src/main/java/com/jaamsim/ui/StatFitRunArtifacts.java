@@ -66,12 +66,45 @@ final class StatFitRunArtifacts {
 	static Path createRunDirectory(Path statfitRoot, String kind) throws IOException {
 		if (!"fit".equals(kind) && !"prepare".equals(kind))
 			throw new IllegalArgumentException("Unknown StatFit run category");
-		Path history = statfitRoot.resolve("runs");
-		Files.createDirectories(history);
+		Path root = statfitRoot.toAbsolutePath().normalize();
+		Files.createDirectories(root);
+		Path history = root.resolve("runs");
+		// Do not let an existing link redirect run artifacts outside the
+		// configured StatFit workspace.
+		if (Files.isSymbolicLink(history))
+			throw new IOException("Diretório runs não pode ser link simbólico");
+		if (!Files.exists(history, LinkOption.NOFOLLOW_LINKS))
+			Files.createDirectory(history);
+		if (!Files.isDirectory(history, LinkOption.NOFOLLOW_LINKS))
+			throw new IOException("Diretório runs inválido");
 		String utc = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS")
 				.withZone(ZoneOffset.UTC).format(Instant.now());
-		return Files.createDirectory(history.resolve(kind + "_" + utc + "_"
+		Path run = Files.createDirectory(history.resolve(kind + "_" + utc + "_"
 				+ UUID.randomUUID().toString().replace("-", "").substring(0, 12)));
+		requireRunDirectory(run);
+		return run;
+	}
+
+	/**
+	 * Run folders and their immediate "runs" parent must be real directories.
+	 * The configured StatFit root may itself be intentionally redirected, but
+	 * a link at the transaction boundary must never redirect receipt writes.
+	 */
+	private static Path requireRunDirectory(Path run) throws IOException {
+		if (run == null)
+			throw new IOException("Diretório de execução ausente");
+		Path absolute = run.toAbsolutePath().normalize();
+		Path history = absolute.getParent();
+		if (history == null || !"runs".equals(history.getFileName().toString())
+				|| Files.isSymbolicLink(history) || Files.isSymbolicLink(absolute)
+				|| !Files.isDirectory(history, LinkOption.NOFOLLOW_LINKS)
+				|| !Files.isDirectory(absolute, LinkOption.NOFOLLOW_LINKS))
+			throw new IOException("Diretório de execução inválido ou redirecionado por link simbólico");
+		Path realHistory = history.toRealPath();
+		Path realRun = absolute.toRealPath();
+		if (!realHistory.equals(realRun.getParent()))
+			throw new IOException("Diretório de execução não é filho direto de runs");
+		return realRun;
 	}
 
 	private static String outputValue(String stdout, String... labels) {
@@ -96,7 +129,7 @@ final class StatFitRunArtifacts {
 	}
 
 	private static Path requireFile(Path run, String raw, String suffix) throws IOException {
-		Path directory = run.toRealPath();
+		Path directory = requireRunDirectory(run);
 		Path candidate = Paths.get(raw);
 		if (!candidate.isAbsolute())
 			throw new IOException("Resultado sem caminho absoluto: " + suffix);
@@ -190,7 +223,7 @@ final class StatFitRunArtifacts {
 	}
 
 	private static void writeReceipt(Path run, String kind, File... files) throws IOException {
-		Path directory = run.toRealPath();
+		Path directory = requireRunDirectory(run);
 		JSONValue receipt = JSONValue.makeObject();
 		receipt.mapVal.put("schema", JSONValue.makeStringVal("jaam.statfit.run_receipt.v1"));
 		receipt.mapVal.put("run_id", JSONValue.makeStringVal(directory.getFileName().toString()));
@@ -240,8 +273,10 @@ final class StatFitRunArtifacts {
 				|| !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)
 				|| candidate.getParent() == null)
 			return false;
+		Path directory;
 		try {
-			if (!run.toRealPath().equals(candidate.getParent().toRealPath()))
+			directory = requireRunDirectory(run);
+			if (!directory.equals(candidate.getParent().toRealPath()))
 				return false;
 		}
 		catch (IOException ex) {
@@ -335,6 +370,7 @@ final class StatFitRunArtifacts {
 		if (!Files.isRegularFile(receiptPath, LinkOption.NOFOLLOW_LINKS))
 			return null;
 		try {
+			requireRunDirectory(run);
 			JSONValue receipt = readObject(receiptPath);
 			if (!"jaam.statfit.run_receipt.v1".equals(text(receipt, "schema"))
 					|| !"COMPLETE_LOCAL".equals(text(receipt, "outcome"))
