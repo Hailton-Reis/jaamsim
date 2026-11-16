@@ -1098,7 +1098,7 @@ public class StatFitAssistantBox extends FrameBox {
 			}
 			if (verified != null) {
 				preparedDataFile = verified.csv;
-				latestMarkdownReportFile = verified.markdown;
+				// Do not replace the AutoFit report with a data preparation report.
 				sb.append("Preparação confirmada nesta execução: ")
 						.append(verified.csv.getAbsolutePath()).append(System.lineSeparator());
 				sb.append("Revise o CSV e clique em Usar CSV preparado se concordar.")
@@ -1179,6 +1179,7 @@ public class StatFitAssistantBox extends FrameBox {
 
 	private void runStatFit() {
 		long request = latestFitRequest.incrementAndGet();
+		latestMarkdownReportFile = null;
 		latestJsonReportFile = null;
 		latestSnippetFile = null;
 		latestHistogramFile = null;
