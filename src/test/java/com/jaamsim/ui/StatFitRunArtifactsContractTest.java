@@ -114,6 +114,17 @@ public final class StatFitRunArtifactsContractTest {
 		StatFitRunArtifacts.recordAcceptedRun(firstPrepare, verified);
 		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_data_assist.json") != null,
 				"accepted preparation appears in history");
+		expect(StatFitRunArtifacts.isAcceptedRunArtifact(
+				firstPrepare, prepare.get("csv")), "accepted prepared CSV hash matches");
+		expect(!StatFitRunArtifacts.isAcceptedRunArtifact(
+				secondPrepare, prepare.get("csv")), "a receipt never authorizes another folder");
+		String cleanCsv = Files.readString(prepare.get("csv"));
+		Files.writeString(prepare.get("csv"), cleanCsv + "999\n");
+		expect(!StatFitRunArtifacts.isAcceptedRunArtifact(firstPrepare, prepare.get("csv")),
+				"changed prepared CSV cannot be used in the GUI");
+		Files.writeString(prepare.get("csv"), cleanCsv);
+		expect(StatFitRunArtifacts.isAcceptedRunArtifact(firstPrepare, prepare.get("csv")),
+				"restored CSV matches accepted hash");
 		expectBlocked("cannot reuse another run's data file",
 				() -> StatFitRunArtifacts.validatePreparation(secondPrepare, prepareOutput(prepare)));
 		expectBlocked("require real prepared JSON",
@@ -147,6 +158,23 @@ public final class StatFitRunArtifactsContractTest {
 		StatFitRunArtifacts.recordAcceptedRun(fit, validFit);
 		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json")
 				.equals(fitted.get("json").toFile()), "accepted fit history is visible");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(null, root.toFile(),
+				"_statfit_report.md", true) == null,
+				"a failed current AutoFit never silently opens an archived report");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(
+				fitted.get("markdown").toFile(), root.toFile(), "_statfit_report.md", true)
+				.equals(fitted.get("markdown").toFile()),
+				"a current completed AutoFit can display its validated report");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(
+				fitted.get("snippet").toFile(), root.toFile(), "_jaamsim_distribution.cfg", true)
+				.equals(fitted.get("snippet").toFile()),
+				"the current validated snippet may be copied");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(
+				fitted.get("snippet").toFile(), root.toFile(), "_statfit_report.md", true) == null,
+				"a current snippet cannot masquerade as a report");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(
+				null, root.toFile(), "_statfit_report.md", false) != null,
+				"historical browsing still works before an AutoFit is attempted");
 
 		String originalFit = Files.readString(fitted.get("json"));
 		Files.writeString(fitted.get("json"), originalFit.replace(
@@ -155,6 +183,9 @@ public final class StatFitRunArtifactsContractTest {
 				() -> StatFitRunArtifacts.validateFit(fit, fitOutput(fitted)));
 		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json") == null,
 				"altered report is hidden from accepted history");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(
+				fitted.get("json").toFile(), root.toFile(), "_statfit_report.json", true) == null,
+				"altered current report blocked by SHA-256 check");
 		Files.writeString(fitted.get("json"), originalFit);
 
 		expectBlocked("fit stdout cannot import old report",
@@ -165,6 +196,9 @@ public final class StatFitRunArtifactsContractTest {
 				() -> StatFitRunArtifacts.validateFit(fit, fitOutput(fitted)));
 		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_jaamsim_distribution.cfg") == null,
 				"deleted snippet no longer appears in history");
+		expect(StatFitRunArtifacts.chooseResultForDisplay(
+				fitted.get("snippet").toFile(), root.toFile(), "_jaamsim_distribution.cfg", true) == null,
+				"deleted current snippet cannot be copied");
 
 		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json")
 				.equals(fitted.get("json").toFile()), "latest run report remains visible in history");
