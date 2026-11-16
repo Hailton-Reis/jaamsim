@@ -659,3 +659,90 @@ nao muda o comportamento do menu 1–11 do CMD.
 o funcionamento do atalho no Windows. Nenhuma substituicao no Drive,
 teste manual, inferencia P004, Full45 ou merge foi executada.
 Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
+
+
+## v0.64 — proveniência local do interpretador Python usado nas revisões (15/11/2026)
+
+**Candidata privada não instalada.** Permanece um único
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd` (mesmo nome e caminho do
+atalho existente), com menu 1–11. O controlador MC-001 histórico, os
+bloqueios P004 DENY / Full45 NO-GO e o arquivo ativo do Windows/Drive
+não foram modificados.
+
+### Implementação e alcance
+
+Na extensão Python, o novo arquivo
+`python/runtime_provenance.py` calcula, **no processo que grava cada
+relatório**, `sys.executable` resolvido, versão Python, implementação,
+SHA-256 do executável e do script de entrada. O metadado tem
+`schema=jaam.ai.python_runtime.v1` e
+`evidence_level=self_reported_no_external_attestation`.
+Não usa internet ou novos subprocessos.
+
+Esses dados entram em:
+- `modulo_ia_offline.py`: JSON da revisão RCL e JSON de status das
+  sugestões, com o mesmo campo `python_runtime`;
+- `statfit_auxiliar.py`: relatório JSON de ajuste de distribuições;
+- `statfit_data_assist.py`: relatório JSON de preparação de dados.
+
+A interface `AIAssistantBox.java` exige essa evidência nas **novas
+revisões RCL iniciadas pela GUI**. Compara localmente os arquivos do
+interpretador e do script com seus hashes declarados, verifica o
+script contra a raiz configurada e confronta o runtime dos JSON de
+revisão e de sugestões. Somente depois um resultado pode ser
+`OFFLINE_CONCLUIDA`. O recibo local inclui `python_runtime`,
+bem como os hashes do CFG e do relatório.
+
+O histórico de versões anteriores sem `python_runtime` permanece
+consultável, mas a ausência de metadado **não pode servir como prova
+de identidade do interpretador**. As condições já existentes de
+origem/hash do CFG, modo offline, identidade da sugestão e recibos
+continuam vigentes.
+
+Na opção 9 do **mesmo CMD principal**, a candidata v0.64 verifica
+o runtime relatado pelo Python, SHA-256 do executável e do script,
+versão 3.11+, correspondência com o script instalado e consistência
+entre os JSON de revisão e status. Falhas bloqueiam sucesso; o
+recibo passa a incluir `python_requested_by_cmd`,
+`python_runtime` e `python_runtime_local_hash_check`.
+Nenhuma alteração é realizada no `.cfg`.
+
+**Limitação fundamental:** a evidência é produzida pelo próprio
+processo. Os hashes locais permitem detectar alterações e
+inconsistências, mas **não são uma assinatura digital, atestação do
+sistema operacional nem prova independente da identidade do processo**.
+Os caminhos locais do computador aparecem nos relatórios e devem
+ser revisados antes de qualquer publicação.
+
+### Estado verificável
+
+- [CI Java JDK25 + **49 verificações headless**](https://github.com/Hailton-Reis/jaamsim/actions/runs/43781539123):
+  **SUCCESS**.
+- [CI Python **95 testes + 6 subtestes**, 4 jobs
+  Windows/Linux × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43781539079):
+  **SUCCESS**.
+- Módulo `JAAM_AI_NATIVE/` com **38/38 arquivos** conferidos
+  por SHA-256 e tamanho (um novo módulo `runtime_provenance.py`).
+  Manifesto SHA-256:
+  `6e24b2ab969ef17312fc20c97681dfef088127d9288ed8d87dab98a560a5d52e`.
+- CMD v0.64: SHA-256
+  `d2f34ccca23a11b51485d205fd1642fd4f2f5617bf7726a656547d5fbee15335`,
+  **2.149.688 bytes**.
+- ZIP privado:
+  `JAAM_AI_V064_CMD_ORIGINAL_RASTREIO_PYTHON_2026-11-15.zip`,
+  SHA-256
+  `270b7a8639192c82a7c1b14b50d881818046ee9138645674e392d8a5da7785e8`,
+  **89 entradas únicas**, e **14 backups históricos** v0.50–v0.63
+  conferidos com seus respectivos manifests e sidecars.
+- Histórico CMD embutido preservado por substituições explícitas,
+  byte-reversíveis, sem mudanças em funções legadas 1–7. Alterações
+  funcionais do CMD limitadas à revisão RCL offline da opção 9.
+- Arquivos auxiliares
+  `JAAM_AI_V064_STATIC_REPORT_2026-11-15.json` e
+  `JAAM_AI_V064_DIFF_CMD_V063_V064.patch`.
+
+**Validação pendente:** sem PowerShell nativo no ambiente de preparo,
+a sintaxe/execução real do CMD em Windows continua **não testada**.
+Nenhuma instalação, teste visual GUI, inferência P004/Full45, alteração
+do atalho ou merge foi executada. Estado:
+`CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
