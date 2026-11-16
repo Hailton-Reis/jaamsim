@@ -66,6 +66,21 @@ public final class OfflineRclReportContractTest {
 				.digest(Files.readAllBytes(file)));
 	}
 
+	private static String runtime(Path executable, Path script) throws Exception {
+		return "{\"schema\":\"jaam.ai.python_runtime.v1\","
+				+ "\"evidence_level\":\"self_reported_no_external_attestation\","
+				+ "\"python_executable\":\"" + escape(executable.toRealPath().toString()) + "\","
+				+ "\"python_executable_sha256\":\"" + sha256(executable) + "\","
+				+ "\"python_version\":\"3.11.9\","
+				+ "\"python_implementation\":\"CPython\","
+				+ "\"entry_script\":\"" + escape(script.toRealPath().toString()) + "\","
+				+ "\"entry_script_sha256\":\"" + sha256(script) + "\"}";
+	}
+
+	private static String addRuntime(String json, String runtime) {
+		return json.substring(0, json.length() - 1) + ",\"python_runtime\":" + runtime + "}";
+	}
+
 	private static String receipt(Path cfg, String cfgSha, String reportSha, boolean unchanged) {
 		return "{\"schema\":\"jaam.ai.offline_review.receipt.v1\","
 				+ "\"source_cfg\":\"" + escape(cfg.toAbsolutePath().normalize().toString())
@@ -310,6 +325,42 @@ public final class OfflineRclReportContractTest {
 		expectLauncherPrecedence(null, "  ", null, "blank Java property");
 		expectLauncherPrecedence(" python.exe ", null, "python.exe",
 				"environment command name remains intact");
+		// New RCL reports provide locally verifiable interpreter evidence.
+		// The executable here is a fixture file; no Python is launched by this test.
+		Path fixtureExe = temp.resolve("fixture-python.exe");
+		Files.writeString(fixtureExe, "fixture-binary-contents");
+		Path fixtureScript = python.resolve("modulo_ia_offline.py");
+		String runtime = runtime(fixtureExe, fixtureScript);
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), runtime));
+		Files.writeString(status, addRuntime(statuses(cfg, "demo"), runtime));
+		expectValid(verifier, report, cfg, assistantRoot);
+
+		String wrongExeDigest = runtime.replace(sha256(fixtureExe), "0".repeat(64));
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), wrongExeDigest));
+		Files.writeString(status, addRuntime(statuses(cfg, "demo"), wrongExeDigest));
+		expectBlocked(verifier, report, cfg, assistantRoot);
+
+		String wrongScriptDigest = runtime.replace(sha256(fixtureScript), "1".repeat(64));
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), wrongScriptDigest));
+		Files.writeString(status, addRuntime(statuses(cfg, "demo"), wrongScriptDigest));
+		expectBlocked(verifier, report, cfg, assistantRoot);
+
+		String badVersion = runtime.replace("3.11.9", "3.10.13");
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), badVersion));
+		Files.writeString(status, addRuntime(statuses(cfg, "demo"), badVersion));
+		expectBlocked(verifier, report, cfg, assistantRoot);
+
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), runtime));
+		Files.writeString(status, statuses(cfg, "demo"));
+		expectBlocked(verifier, report, cfg, assistantRoot);
+
+		Files.writeString(status, addRuntime(statuses(cfg, "demo"), runtime));
+		String wrongScript = runtime.replace(
+				escape(fixtureScript.toRealPath().toString()),
+				escape(python.resolve("another_script.py").toString()));
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), wrongScript));
+		expectBlocked(verifier, report, cfg, assistantRoot);
+
 		System.out.println("RCL_REPORT_PROVENANCE_CONTRACT_OK " + checks);
 	}
 }
