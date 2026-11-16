@@ -289,6 +289,117 @@ final class StatFitRunArtifacts {
 	}
 
 	/**
+	 * A historical AutoFit is a seven-file transaction, not seven independent
+	 * "latest filename" lookups. Mixing histogram from run A with Q-Q from
+	 * run B can produce a plausible, but scientifically invalid comparison.
+	 *
+	 * Only an accepted and wholly intact fit run qualifies. Legacy loose
+	 * output files remain accessible through "Abrir pasta", not implicitly
+	 * as a current coherent fit.
+	 */
+	static Fit chooseFitForDisplay(File statfitRoot, Fit current, boolean attempted) {
+		if (attempted)
+			return isCompleteFit(statfitRoot, current) ? current : null;
+		return findLatestAcceptedFit(statfitRoot);
+	}
+
+	static Fit findLatestAcceptedFit(File statfitRoot) {
+		if (statfitRoot == null)
+			return null;
+		Path history = statfitRoot.toPath().toAbsolutePath().normalize().resolve("runs");
+		if (!Files.isDirectory(history, LinkOption.NOFOLLOW_LINKS))
+			return null;
+		Fit newest = null;
+		String newestRunId = null;
+		try (Stream<Path> runs = Files.list(history)) {
+			for (Path run : (Iterable<Path>) runs::iterator) {
+				if (!Files.isDirectory(run, LinkOption.NOFOLLOW_LINKS)
+						|| !run.getFileName().toString().startsWith("fit_"))
+					continue;
+				Fit candidate = readAcceptedFit(run);
+				if (candidate != null && (newestRunId == null
+						|| run.getFileName().toString().compareTo(newestRunId) > 0)) {
+					newest = candidate;
+					newestRunId = run.getFileName().toString();
+				}
+			}
+		}
+		catch (IOException ex) {
+			// Do not manufacture a combined fit from partial history.
+		}
+		return newest;
+	}
+
+	private static Fit readAcceptedFit(Path run) {
+		Path receiptPath = run.resolve("STATFIT_RUN_RECEIPT.json");
+		if (!Files.isRegularFile(receiptPath, LinkOption.NOFOLLOW_LINKS))
+			return null;
+		try {
+			JSONValue receipt = readObject(receiptPath);
+			if (!"jaam.statfit.run_receipt.v1".equals(text(receipt, "schema"))
+					|| !"COMPLETE_LOCAL".equals(text(receipt, "outcome"))
+					|| !"fit".equals(text(receipt, "kind"))
+					|| !run.getFileName().toString().equals(text(receipt, "run_id")))
+				return null;
+			JSONValue hashes = member(receipt, "artifact_sha256");
+			if (hashes == null || !hashes.isMap() || hashes.mapVal.size() != 7)
+				return null;
+			Path markdown = receiptFileForSuffix(run, hashes, "_statfit_report.md");
+			Path json = receiptFileForSuffix(run, hashes, "_statfit_report.json");
+			Path histogram = receiptFileForSuffix(run, hashes, "_histograma.svg");
+			Path ecdf = receiptFileForSuffix(run, hashes, "_cdf_empirica.svg");
+			Path qq = receiptFileForSuffix(run, hashes, "_qq_plot.svg");
+			Path pp = receiptFileForSuffix(run, hashes, "_pp_plot.svg");
+			Path snippet = receiptFileForSuffix(run, hashes, "_jaamsim_distribution.cfg");
+			if (markdown == null || json == null || histogram == null
+					|| ecdf == null || qq == null || pp == null || snippet == null)
+				return null;
+			return new Fit(markdown, json, histogram, ecdf, qq, pp, snippet);
+		}
+		catch (Exception ex) {
+			return null;
+		}
+	}
+
+	private static Path receiptFileForSuffix(Path run, JSONValue hashes, String suffix) {
+		String matched = null;
+		for (String key : hashes.mapVal.keySet()) {
+			if (!key.endsWith(suffix))
+				continue;
+			if (matched != null)
+				return null;
+			matched = key;
+		}
+		if (matched == null || !Paths.get(matched).getFileName().toString().equals(matched))
+			return null;
+		Path file = run.resolve(matched);
+		return isAcceptedRunArtifact(run, file) ? file : null;
+	}
+
+	private static boolean isCompleteFit(File statfitRoot, Fit fit) {
+		if (fit == null || statfitRoot == null)
+			return false;
+		Path root = statfitRoot.toPath().toAbsolutePath().normalize().resolve("runs");
+		File[] files = new File[] {fit.markdown, fit.json, fit.histogram,
+				fit.ecdf, fit.qq, fit.pp, fit.snippet};
+		Path run = fit.json.toPath().toAbsolutePath().normalize().getParent();
+		if (run == null || !root.equals(run.getParent())
+				|| !run.getFileName().toString().startsWith("fit_"))
+			return false;
+		Fit saved = readAcceptedFit(run);
+		if (saved == null)
+			return false;
+		File[] expected = new File[] {saved.markdown, saved.json, saved.histogram,
+				saved.ecdf, saved.qq, saved.pp, saved.snippet};
+		for (int i = 0; i < files.length; i++) {
+			if (files[i] == null || !files[i].toPath().toAbsolutePath().normalize()
+					.equals(expected[i].toPath().toAbsolutePath().normalize()))
+				return false;
+		}
+		return true;
+	}
+
+	/**
 	 * Show the latest successful-looking local artifact in direct legacy
 	 * folders or one level below runs/. Never recurse arbitrarily or follow
 	 * symlinked run directories. This is browsing, not success attestation.
