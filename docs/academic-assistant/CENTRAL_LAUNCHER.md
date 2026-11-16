@@ -726,17 +726,19 @@ ser revisados antes de qualquer publicação.
   Manifesto SHA-256:
   `6e24b2ab969ef17312fc20c97681dfef088127d9288ed8d87dab98a560a5d52e`.
 - CMD v0.64: SHA-256
-  `d2f34ccca23a11b51485d205fd1642fd4f2f5617bf7726a656547d5fbee15335`,
+  `5a97719ecdae728ed69b6e0dd50b4f449843a273f3e5d9688b4b09e725b001bf`,
   **2.149.688 bytes**.
 - ZIP privado:
   `JAAM_AI_V064_CMD_ORIGINAL_RASTREIO_PYTHON_2026-11-15.zip`,
   SHA-256
-  `270b7a8639192c82a7c1b14b50d881818046ee9138645674e392d8a5da7785e8`,
+  `04ff2bf05a1e2f99482c88645fa1f3903610e692263dadc67960c3023170aa57`,
   **89 entradas únicas**, e **14 backups históricos** v0.50–v0.63
   conferidos com seus respectivos manifests e sidecars.
 - Histórico CMD embutido preservado por substituições explícitas,
-  byte-reversíveis, sem mudanças em funções legadas 1–7. Alterações
-  funcionais do CMD limitadas à revisão RCL offline da opção 9.
+  byte-reversíveis, sem mudanças em funções legadas 1–7. Além da revisão
+  RCL offline da opção 9, o teste de integridade e a mensagem do status
+  foram ajustados de **37 para 38 arquivos**; sem isso, a verificação
+  bloquearia equivocadamente o novo pacote.
 - Arquivos auxiliares
   `JAAM_AI_V064_STATIC_REPORT_2026-11-15.json` e
   `JAAM_AI_V064_DIFF_CMD_V063_V064.patch`.
