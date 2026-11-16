@@ -1945,20 +1945,30 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private List<String> buildDataAssistCommand(File dataFile, Path script, Path outputDir) {
+		return buildOfflineDataAssistCommand(resolvePythonCommand(), dataFile, script,
+				outputDir, columnField.getText().trim());
+	}
+
+	/**
+	 * Fail closed: preparing a dataset is a LOCAL operation. In particular,
+	 * never add --online or a provider order merely because the user clicked
+	 * "Preparar dados". A separate explicit opt-in workflow would be needed
+	 * for network calls, and none is enabled by this native button.
+	 *
+	 * Kept independently testable to prevent accidental reintroduction of
+	 * online provider invocation in the native StatFit interface.
+	 */
+	private static List<String> buildOfflineDataAssistCommand(String python, File dataFile,
+			Path script, Path outputDir, String column) {
 		ArrayList<String> command = new ArrayList<>();
-		command.add(resolvePythonCommand());
+		command.add(python);
 		command.add(script.toString());
 		command.add(dataFile.getAbsolutePath());
 		command.add("--output-dir");
 		command.add(outputDir.toString());
-		command.add("--online");
-		command.add("--provider-order");
-		command.add("nvidia,cerebras,groq");
-
-		String column = columnField.getText().trim();
-		if (!column.isEmpty()) {
+		if (column != null && !column.trim().isEmpty()) {
 			command.add("--column");
-			command.add(column);
+			command.add(column.trim());
 		}
 		return command;
 	}
