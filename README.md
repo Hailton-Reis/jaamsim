@@ -22,15 +22,15 @@ The prototype can inspect a structured model snapshot and report conditions such
 ## Central Windows launcher (existing shortcut preserved)
 
 The **original** `RODAR_JAAM_AI_COMPLETO.cmd` belongs to the private
-`00_PROJETO_ATUAL` workspace on Google Drive. It has a pinned, historic
-v0.50 version and a staged v0.51 candidate that extends the **same file**
-with menu options 8-11 (native JaamSim, offline CFG review, report folder,
-module status). Existing MC-001 options 1-7 and P004/Full45 DENY restrictions
-remain in the central CMD. The user’s existing shortcut stays pointed at
-the same path after the private candidate is installed.
+`00_PROJETO_ATUAL` workspace on Google Drive. Its v0.50 baseline and
+intermediate releases are preserved as historical backups. The current
+private engineering candidate is v0.69, built by updating the **same
+central CMD file**; it is not installed or manually accepted on Windows.
+The existing shortcut path is preserved. Menu options 1-11, MC-001
+options 1-7, and P004/Full45 DENY restrictions remain in the central CMD.
 
-**This public repository intentionally does not contain or replace that
-2.1 MB self-contained historic launcher.** Its build artifact is only the
+**This repository intentionally does not contain or replace the
+self-contained private launcher.** Its build artifact is only the
 `JAAM_AI_NATIVE` Java/Python module to place beside the main CMD.
 No alternate Windows launcher is created.
 
