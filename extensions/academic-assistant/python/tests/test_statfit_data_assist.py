@@ -40,7 +40,7 @@ class StatFitDataAssistTest(unittest.TestCase):
                 side_effect=AssertionError("Unexpected external AI request"),
             ) as online:
                 report, attempts = assist.prepare_data(
-                    self.build_args(Path(tmp), "tempo\\n1\\n2\\n3\\n4\\n5\\n")
+                    self.build_args(Path(tmp), "tempo\n1\n2\n3\n4\n5\n")
                 )
                 online.assert_not_called()
 
