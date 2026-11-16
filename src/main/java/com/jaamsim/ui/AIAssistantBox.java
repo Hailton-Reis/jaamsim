@@ -39,19 +39,25 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.text.Normalizer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -355,6 +361,7 @@ public class AIAssistantBox extends FrameBox {
 		panel.setOpaque(false);
 		panel.add(createPromptButton("Dicas", "me dê dicas para continuar"));
 		panel.add(createPromptButton("Revisar modelo", "revise meu modelo"));
+		panel.add(createPromptButton("Histórico RCL", "mostrar histórico de revisões"));
 		panel.add(createPromptButton("Criar PRD", "quero construir uma simulação do zero"));
 		panel.add(createPromptButton("Explicar alerta", "explique este alerta"));
 		panel.add(createPromptButton("Quando usar StatFit?", "quando uso StatFit?"));
@@ -1222,6 +1229,12 @@ public class AIAssistantBox extends FrameBox {
 			return;
 		}
 
+		if (isExplicitReviewHistoryIntent(normalized)) {
+			appendChatMessage("Assistente", "Vou consultar o histórico local de revisões, sem executar a análise novamente.");
+			showReviewHistory();
+			return;
+		}
+
 		if (isExplicitReviewIntent(normalized)) {
 			appendChatMessage("Assistente", "Vou revisar o modelo salvo com as regras locais. Se o modelo ainda não foi salvo como .cfg, o JaamSim vai pedir esse passo primeiro.");
 			runLocalRcl();
@@ -1319,13 +1332,20 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static boolean looksLikeCommand(String value) {
-		return isExplicitReviewIntent(value)
+		return isExplicitReviewHistoryIntent(value)
+				|| isExplicitReviewIntent(value)
 				|| isExplicitSuggestionListIntent(value)
 				|| isExplicitAcceptSuggestionIntent(value)
 				|| isExplicitRejectSuggestionIntent(value)
 				|| containsAny(value, "statfit",
 				"distribuic", "csv", "dados", "abrir", "pasta", "config", "notific", "cooldown",
 				"autocorrec", "dica", "ajuda", "proximo passo", "proximos passos");
+	}
+
+	private static boolean isExplicitReviewHistoryIntent(String value) {
+		return containsAny(value, "historico rcl", "historico de revisao",
+				"historico de revisoes", "mostrar historico", "listar revisoes",
+				"ultimas revisoes", "ver revisoes", "revisoes anteriores");
 	}
 
 	private static boolean isExplicitReviewIntent(String value) {
@@ -1767,66 +1787,121 @@ public class AIAssistantBox extends FrameBox {
 	private void runLocalRclWorker() {
 		try {
 			JaamSimModel simModel = GUIFrame.getJaamSimModel();
-			if (simModel == null) {
-				appendStatusText("Assistente: não encontrei modelo ativo." + System.lineSeparator());
+			if (simModel == null || simModel.getConfigFile() == null) {
+				appendStatusText("Assistente: salve o modelo como .cfg antes da revisão." + System.lineSeparator());
 				return;
 			}
-
 			File cfgFile = simModel.getConfigFile();
-			if (cfgFile == null) {
-				appendStatusText("Assistente: salve o modelo como .cfg antes de rodar a revisão." + System.lineSeparator());
-				return;
-			}
 			if (!cfgFile.isFile()) {
-				appendStatusText("Assistente: arquivo de configuração não encontrado: "
-						+ cfgFile.getAbsolutePath() + System.lineSeparator());
+				appendStatusText("Assistente: CFG não encontrado: " + cfgFile.getAbsolutePath() + System.lineSeparator());
 				return;
 			}
 
 			Path assistantRoot = findAssistantRoot(cfgFile);
 			if (assistantRoot == null) {
-				appendStatusText("Assistente: não encontrei a pasta da extensao academica." + System.lineSeparator()
-						+ "Configure JAAMSIM_ASSISTANT_ROOT ou jaamsim.assistant.root apontando para extensions/academic-assistant." + System.lineSeparator());
+				appendStatusText("Assistente: raiz da extensão não encontrada. Configure JAAMSIM_ASSISTANT_ROOT."
+						+ System.lineSeparator());
 				return;
 			}
 
 			Path script = assistantRoot.resolve("python").resolve("modulo_ia_offline.py");
-			Path outputDir = assistantRoot.resolve("output")
-					.resolve("offline-review")
-					.resolve("native_rcl");
+			if (!Files.isRegularFile(script)) {
+				appendStatusText("Assistente: motor RCL não encontrado: " + script + System.lineSeparator());
+				return;
+			}
 			String modelId = buildModelId(cfgFile);
-			Path statusFile = outputDir.resolve(modelId + "_suggestions_status.json");
-			List<String> command = buildRclCommand(cfgFile, script, outputDir, modelId, statusFile);
-
-			appendStatusText("Assistente: vou revisar o modelo salvo e te mostrar os principais achados." + System.lineSeparator());
-			if (Files.isRegularFile(statusFile)) {
-				appendStatusText("Assistente: também vou respeitar decisões de sugestões já registradas." + System.lineSeparator());
+			Path outputRoot = getRclOutputRoot(assistantRoot);
+			// Import only decisions tied to the SAME physical CFG and SAME content hash.
+			String beforeSha = sha256File(cfgFile.toPath());
+			Path priorStatus = findSuggestionStatusFile(outputRoot, cfgFile.toPath(), beforeSha);
+			Path outputDir = createRclOutputDir(outputRoot);
+			List<String> command = buildRclCommand(cfgFile, script, outputDir, modelId, priorStatus);
+			appendStatusText("Assistente: revisão offline em pasta exclusiva: " + outputDir.toAbsolutePath()
+					+ System.lineSeparator());
+			if (priorStatus != null) {
+				appendStatusText("Assistente: decisões anteriores do mesmo CFG e conteúdo serão consideradas."
+						+ System.lineSeparator());
 			}
 
-			RclRunResult result = executeCommand(command, assistantRoot, RCL_TIMEOUT_SECONDS);
+			RclRunResult result = null;
+			String errorText = null;
+			try {
+				result = executeCommand(command, assistantRoot, RCL_TIMEOUT_SECONDS);
+			}
+			catch (Exception ex) {
+				errorText = ex.getClass().getSimpleName() + ": " + ex.getMessage();
+			}
+
+			String afterSha = null;
+			try {
+				afterSha = sha256File(cfgFile.toPath());
+			}
+			catch (IOException ex) {
+				errorText = (errorText == null ? "" : errorText + "; ")
+						+ "CFG não pôde ser conferido após a revisão";
+			}
+			boolean unchanged = beforeSha.equals(afterSha);
+			Path reportFile = outputDir.resolve(modelId + "_offline_review.json");
+			String reportError = validateOfflineRclReport(reportFile, cfgFile.toPath(), modelId, assistantRoot);
+			JSONValue pythonRuntime = null;
+			if (reportError == null) {
+				try {
+					pythonRuntime = getMapChild(readJsonFile(reportFile), "python_runtime");
+					if (pythonRuntime == null)
+						reportError = "relatório não identifica o interpretador Python utilizado";
+				}
+				catch (Exception ex) {
+					reportError = "metadados de execução Python indisponíveis";
+				}
+			}
+			boolean validReport = reportError == null;
+			String reportSha = null;
+			if (validReport) {
+				try {
+					reportSha = sha256File(reportFile);
+				}
+				catch (IOException ex) {
+					validReport = false;
+					reportError = "não foi possível calcular SHA-256 do JSON de revisão";
+				}
+			}
+			boolean complete = result != null && result.finished && result.exitCode == 0
+					&& unchanged && validReport;
+
+			// The receipt is written even when Python fails or reaches the time limit.
+			// A missing receipt is an error, never a successful review.
+			writeRclReceipt(outputDir, cfgFile.toPath(), modelId, beforeSha, afterSha, reportSha,
+					pythonRuntime, result, errorText, complete);
+
 			StringBuilder sb = new StringBuilder();
-			sb.append("Assistente: revisão finalizada=");
-			sb.append(result.finished);
-			sb.append(", código=");
-			sb.append(result.exitCode);
-			sb.append(System.lineSeparator());
-			if (!result.finished) {
-				sb.append("Assistente: tempo limite após ");
-				sb.append(RCL_TIMEOUT_SECONDS);
-				sb.append(" segundos. O processo foi interrompido.");
-				sb.append(System.lineSeparator());
-			}
-			if (result.output.trim().isEmpty()) {
-				sb.append("Saída da revisão: vazia").append(System.lineSeparator());
-			}
-			else {
-				sb.append("Saída da revisão:").append(System.lineSeparator());
-				sb.append(limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS)).append(System.lineSeparator());
+			sb.append("Assistente: revisão ").append(complete ? "OFFLINE_CONCLUIDA" : "FALHOU_OU_BLOQUEADA")
+					.append(System.lineSeparator());
+			sb.append("Sessão: ").append(outputDir.getFileName()).append(System.lineSeparator());
+			sb.append("Resultados: ").append(outputDir.toAbsolutePath()).append(System.lineSeparator());
+			sb.append("CFG SHA-256 antes: ").append(beforeSha).append(System.lineSeparator());
+			sb.append("CFG SHA-256 depois: ").append(afterSha == null ? "indisponível" : afterSha)
+					.append(System.lineSeparator());
+			if (!unchanged)
+				sb.append("BLOQUEADO: CFG modificado ou não verificável. Não houve restauração automática.")
+						.append(System.lineSeparator());
+			if (!validReport)
+				sb.append("BLOQUEADO: relatório JSON inválido ou de outro modelo: ")
+						.append(reportError).append(System.lineSeparator());
+			if (errorText != null)
+				sb.append("Erro técnico: ").append(errorText).append(System.lineSeparator());
+			if (result != null) {
+				sb.append("Processo concluído=").append(result.finished)
+						.append(", código=").append(result.exitCode).append(System.lineSeparator());
+				if (!result.output.trim().isEmpty()) {
+					sb.append("Saída da revisão:").append(System.lineSeparator());
+					sb.append(limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS))
+							.append(System.lineSeparator());
+				}
 			}
 			appendStatusText(sb.toString());
 		}
 		catch (Exception ex) {
-		appendStatusText("Erro na revisão local: " + ex.getClass().getSimpleName()
+			appendStatusText("Erro na revisão local: " + ex.getClass().getSimpleName()
 					+ ": " + ex.getMessage() + System.lineSeparator());
 		}
 	}
@@ -1845,10 +1920,8 @@ public class AIAssistantBox extends FrameBox {
 				return;
 			}
 
-			Path outputDir = assistantRoot.resolve("output")
-					.resolve("offline-review")
-					.resolve("native_rcl");
-			openFolder(outputDir, "Abrir resultados da revisão");
+			Path outputDir = getRclOutputRoot(assistantRoot);
+			openFolder(outputDir, "Abrir histórico de revisões offline");
 		}
 		catch (Exception ex) {
 			appendStatusText(System.lineSeparator()
@@ -1900,6 +1973,137 @@ public class AIAssistantBox extends FrameBox {
 					+ ": " + ex.getMessage() + System.lineSeparator());
 			return true;
 		}
+	}
+
+	/**
+	 * Display local RCL history; read-only. The active CFG path selects the
+	 * model, while its current hash distinguishes previous revisions.
+	 * No Python, JaamSim batch, LLM or P004 action is dispatched.
+	 */
+	private void showReviewHistory() {
+		try {
+			JaamSimModel simModel = GUIFrame.getJaamSimModel();
+			File cfgFile = simModel == null ? null : simModel.getConfigFile();
+			File anchor = cfgFile == null ? new File(".") : cfgFile;
+			Path assistantRoot = findAssistantRoot(anchor);
+			if (assistantRoot == null) {
+				appendStatusText("Histórico RCL: extensão acadêmica indisponível."
+						+ System.lineSeparator());
+				return;
+			}
+			Path root = getRclOutputRoot(assistantRoot);
+			if (!Files.isDirectory(root)) {
+				appendStatusText("Histórico RCL: ainda não há revisões registradas."
+						+ System.lineSeparator());
+				return;
+			}
+
+			Path selected = cfgFile == null ? null : cfgFile.toPath().toAbsolutePath().normalize();
+			String currentHash = null;
+			if (selected != null && Files.isRegularFile(selected)) {
+				try {
+					currentHash = sha256File(selected);
+				}
+				catch (IOException ex) {
+					// History remains available, but no current-version match is claimed.
+				}
+			}
+
+			ArrayList<Path> runs = new ArrayList<>();
+			try (java.util.stream.Stream<Path> folders = Files.list(root)) {
+				for (Path folder : (Iterable<Path>) folders::iterator) {
+					if (Files.isDirectory(folder, LinkOption.NOFOLLOW_LINKS))
+						runs.add(folder);
+				}
+			}
+			Collections.sort(runs, (a, b) -> {
+				try {
+					return Files.getLastModifiedTime(b).compareTo(Files.getLastModifiedTime(a));
+				}
+				catch (IOException ex) {
+					return a.toString().compareTo(b.toString());
+				}
+			});
+
+			StringBuilder sb = new StringBuilder();
+			sb.append("Histórico RCL — consulta local, sem executar nova revisão")
+					.append(System.lineSeparator());
+			if (selected != null) {
+				sb.append("Modelo selecionado: ").append(selected).append(System.lineSeparator());
+				if (currentHash == null)
+					sb.append("Hash atual: indisponível (não confirma equivalência de versão)")
+							.append(System.lineSeparator());
+			}
+			else {
+				sb.append("Sem CFG ativo: exibindo as últimas revisões locais de todos os modelos.")
+						.append(System.lineSeparator());
+			}
+			int shown = 0;
+						for (Path run : runs) {
+				Path receiptFile = run.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+				if (!Files.isRegularFile(receiptFile, LinkOption.NOFOLLOW_LINKS))
+					continue;
+				try {
+					JSONValue receipt = readJsonFile(receiptFile);
+					if (!"jaam.ai.offline_review.receipt.v1".equals(
+							getStringChild(receipt, "schema", "")))
+						continue;
+					String sourceRaw = getStringChild(receipt, "source_cfg", "");
+					if (sourceRaw.isEmpty())
+						continue;
+					Path source = Paths.get(sourceRaw).toAbsolutePath().normalize();
+					if (selected != null && !selected.equals(source)) {
+						continue;
+					}
+					String sha = getStringChild(receipt, "cfg_sha256_after", "");
+					boolean sameVersion = currentHash != null
+							&& currentHash.equalsIgnoreCase(sha)
+							&& Boolean.TRUE.equals(isTrueChild(receipt, "cfg_unchanged"));
+					String runId = getStringChild(receipt, "run_id", run.getFileName().toString());
+					String outcome = getStringChild(receipt, "outcome", "RESULTADO_DESCONHECIDO");
+					String sourceLabel = "JAAMSIM_GUI_RCL".equals(
+							getStringChild(receipt, "origin", "")) ? "janela JaamSim" : "CMD central/local";
+					sb.append(System.lineSeparator());
+					sb.append(shown + 1).append(". ").append(runId)
+							.append(" | ").append(outcome)
+							.append(" | ").append(sourceLabel).append(System.lineSeparator());
+					sb.append("   CFG: ").append(source.getFileName()).append(System.lineSeparator());
+					sb.append("   UTC: ").append(getStringChild(receipt, "utc_timestamp", "não informado"))
+							.append(System.lineSeparator());
+					if (selected != null) {
+						sb.append("   Versão do CFG: ")
+								.append(sameVersion ? "mesmo conteúdo atual" : "outra versão / não verificável")
+								.append(System.lineSeparator());
+					}
+					sb.append("   Pasta: ").append(run.toAbsolutePath()).append(System.lineSeparator());
+					shown++;
+					if (shown >= 10)
+						break;
+				}
+				catch (Exception ex) {
+					// Corrupted receipts cannot be treated as reliable evidence.
+				}
+			}
+			if (shown == 0)
+				sb.append("Nenhum recibo compatível com o modelo selecionado.")
+						.append(System.lineSeparator());
+			sb.append(System.lineSeparator());
+			sb.append("Recibos são registros locais, não assinaturas digitais.")
+					.append(System.lineSeparator());
+			sb.append("Decisões anteriores somente são usadas quando caminho, SHA-256 e estado coincidem.")
+					.append(System.lineSeparator());
+			appendStatusText(sb.toString());
+		}
+		catch (Exception ex) {
+			appendStatusText("Histórico RCL: falha ao ler registros: "
+					+ ex.getClass().getSimpleName() + ": " + ex.getMessage()
+					+ System.lineSeparator());
+		}
+	}
+
+	private static Boolean isTrueChild(JSONValue parent, String key) {
+		JSONValue value = getMapChild(parent, key);
+		return value == null ? null : value.isTrue();
 	}
 
 	private void showLatestSuggestions() {
@@ -1985,54 +2189,356 @@ public class AIAssistantBox extends FrameBox {
 
 	private SuggestionFileContext findSuggestionFileContext() throws IOException {
 		JaamSimModel simModel = GUIFrame.getJaamSimModel();
-		File anchorFile = new File(".");
-		String modelId = null;
-		if (simModel != null && simModel.getConfigFile() != null) {
-			anchorFile = simModel.getConfigFile();
-			modelId = buildModelId(anchorFile);
+		File anchorFile = simModel == null ? null : simModel.getConfigFile();
+		if (anchorFile == null || !anchorFile.isFile()) {
+			appendStatusText("Assistente: salve o CFG para recuperar decisões do modelo correto."
+					+ System.lineSeparator());
+			return null;
 		}
-
 		Path assistantRoot = findAssistantRoot(anchorFile);
 		if (assistantRoot == null) {
-			appendStatusText(System.lineSeparator()
-					+ "Assistente: raiz da extensao não encontrada. Configure JAAMSIM_ASSISTANT_ROOT." + System.lineSeparator());
+			appendStatusText("Assistente: raiz da extensão não encontrada. Configure JAAMSIM_ASSISTANT_ROOT."
+					+ System.lineSeparator());
 			return null;
 		}
-
-		Path outputDir = assistantRoot.resolve("output")
-				.resolve("offline-review")
-				.resolve("native_rcl");
-		Path statusFile = findSuggestionStatusFile(outputDir, modelId);
-		return new SuggestionFileContext(outputDir, statusFile);
+		Path reportRoot = getRclOutputRoot(assistantRoot);
+		Path status = findSuggestionStatusFile(reportRoot, anchorFile.toPath(),
+				sha256File(anchorFile.toPath()));
+		return new SuggestionFileContext(reportRoot, status);
 	}
 
-	private static Path findSuggestionStatusFile(Path outputDir, String preferredModelId) throws IOException {
-		if (preferredModelId != null) {
-			Path preferred = outputDir.resolve(preferredModelId + "_suggestions_status.json");
-			if (Files.isRegularFile(preferred))
-				return preferred;
-		}
-		if (!Files.isDirectory(outputDir))
+	private static Path getRclOutputRoot(Path assistantRoot) {
+		return assistantRoot.resolve("output").resolve("offline-review");
+	}
+
+	private static Path createRclOutputDir(Path root) throws IOException {
+		Files.createDirectories(root);
+		String utc = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss_SSS")
+				.withZone(ZoneOffset.UTC).format(java.time.Instant.now());
+		return Files.createDirectory(root.resolve("gui_" + utc + "_"
+				+ UUID.randomUUID().toString().replace("-", "").substring(0, 12)));
+	}
+
+	/**
+	 * A status is reusable only for the exact source path and CFG content.
+	 * The historical native_rcl flat folder has no authenticated provenance,
+	 * so it is intentionally NOT imported to avoid cross-model decisions.
+	 */
+	private static Path findSuggestionStatusFile(Path reportRoot, Path cfgFile, String cfgSha)
+			throws IOException {
+		if (!Files.isDirectory(reportRoot))
 			return null;
-
-		Path latest = null;
-		FileTime latestTime = null;
-		try (java.util.stream.Stream<Path> paths = Files.list(outputDir)) {
-			for (Path path : (Iterable<Path>) paths::iterator) {
-				if (!Files.isRegularFile(path))
+		Path source = cfgFile.toAbsolutePath().normalize();
+		Path newest = null;
+		FileTime newestTime = null;
+		Path assistantRoot = reportRoot.getParent().getParent();
+		try (java.util.stream.Stream<Path> runs = Files.list(reportRoot)) {
+			for (Path run : (Iterable<Path>) runs::iterator) {
+				if (!Files.isDirectory(run, LinkOption.NOFOLLOW_LINKS))
 					continue;
-				String fileName = path.getFileName().toString();
-				if (!fileName.endsWith("_suggestions_status.json"))
+				Path receiptFile = run.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+				if (!Files.isRegularFile(receiptFile, LinkOption.NOFOLLOW_LINKS))
 					continue;
+				try {
+					JSONValue receipt = readJsonFile(receiptFile);
+					String recorded = getStringChild(receipt, "source_cfg", "");
+					String recordedSha = getStringChild(receipt, "cfg_sha256_after", "");
+					JSONValue unchanged = getMapChild(receipt, "cfg_unchanged");
+					if (recorded.isEmpty() || !source.equals(Paths.get(recorded).toAbsolutePath().normalize())
+							|| !cfgSha.equalsIgnoreCase(recordedSha)
+							|| unchanged == null || !unchanged.isTrue())
+						continue;
 
-				FileTime modified = Files.getLastModifiedTime(path);
-				if (latest == null || modified.compareTo(latestTime) > 0) {
-					latest = path;
-					latestTime = modified;
+					String outcome = getStringChild(receipt, "outcome", "");
+					if (!"COMPLETE_OFFLINE".equals(outcome) && !"COMPLETED_OFFLINE".equals(outcome))
+						continue;
+
+					// CMD reviews let the Python parser choose a normalized
+					// model_id. The GUI may use a different explicit model_id.
+					// Require ONE report in this run and read its actual ID,
+					// rather than guessing a filename from the CFG name.
+					Path candidateReport = findUniqueRclReport(run);
+					if (candidateReport == null
+							|| validateOfflineRclReport(candidateReport, cfgFile, null, assistantRoot) != null)
+						continue;
+					JSONValue report = readJsonFile(candidateReport);
+					String actualModelId = getStringChild(getMapChild(report, "analysis"), "model_id", "");
+
+					String pinnedReportSha = getStringChild(receipt, "report_sha256", "");
+					String origin = getStringChild(receipt, "origin", "");
+					if (pinnedReportSha.isEmpty()) {
+						// Historical CMD receipts did not yet pin report hashes.
+						// New GUI receipts must always pin them to be reusable.
+						if ("JAAMSIM_GUI_RCL".equals(origin))
+							continue;
+					}
+					else if (!pinnedReportSha.equalsIgnoreCase(sha256File(candidateReport)))
+						continue;
+
+					Path statusFile = run.resolve(actualModelId + "_suggestions_status.json");
+					if (!Files.isRegularFile(statusFile, LinkOption.NOFOLLOW_LINKS))
+						continue;
+					JSONValue status = readJsonFile(statusFile);
+					if (!actualModelId.equals(getStringChild(status, "model_id", "")))
+						continue;
+					Path statusSource = resolveReportedSource(
+							getStringChild(status, "input_file", ""), assistantRoot);
+					if (!source.equals(statusSource))
+						continue;
+
+					FileTime modified = Files.getLastModifiedTime(statusFile);
+					if (newest == null || modified.compareTo(newestTime) > 0) {
+						newest = statusFile;
+						newestTime = modified;
+					}
+				}
+				catch (Exception ex) {
+					// Corrupt or partial histories cannot authorize decisions.
 				}
 			}
 		}
-		return latest;
+		return newest;
+	}
+
+	/**
+	 * Fail closed for runs with zero or multiple RCL reports. A run is a
+	 * single-model review; ambiguity cannot select trusted suggestions.
+	 */
+	private static Path findUniqueRclReport(Path run) throws IOException {
+		Path found = null;
+		try (java.util.stream.Stream<Path> reports = Files.list(run)) {
+			for (Path path : (Iterable<Path>) reports::iterator) {
+				if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)
+						|| !path.getFileName().toString().endsWith("_offline_review.json"))
+					continue;
+				if (found != null)
+					return null;
+				found = path;
+			}
+		}
+		return found;
+	}
+
+	/**
+	 * Validate the RCL JSON rather than treating file existence as proof of
+	 * a successful review. A forged or stale JSON for another CFG is not a
+	 * successful result, even if the subprocess exits with code zero.
+	 * Returns null on success or a user-readable reason for rejection.
+	 */
+	private static String validateOfflineRclReport(Path reportFile, Path cfgFile, String modelId,
+			Path assistantRoot) {
+		if (!Files.isRegularFile(reportFile, LinkOption.NOFOLLOW_LINKS))
+			return "arquivo de revisão ausente";
+		try {
+			JSONValue report = readJsonFile(reportFile);
+			if (report == null || !report.isMap())
+				return "estrutura JSON inválida";
+			if (!"offline_deterministico".equals(getStringChild(report, "mode", "")))
+				return "revisão não é determinística offline";
+			if (!"cfg".equals(getStringChild(report, "input_type", "")))
+				return "relatório não foi gerado a partir de CFG";
+
+			Path recorded = resolveReportedSource(getStringChild(report, "input_file", ""), assistantRoot);
+			if (recorded == null || !cfgFile.toAbsolutePath().normalize().equals(recorded))
+				return "origem do CFG não corresponde ao modelo selecionado";
+
+			JSONValue analysis = getMapChild(report, "analysis");
+			String actualModelId = getStringChild(analysis, "model_id", "");
+			if (actualModelId.isEmpty() || actualModelId.equals(".") || actualModelId.equals("..")
+					|| !actualModelId.matches("[A-Za-z0-9._-]+"))
+				return "identificador do modelo inválido para arquivo local";
+			if (modelId != null && !modelId.equals(actualModelId))
+				return "identificador do modelo é diferente";
+			if (!reportFile.getFileName().toString().equals(actualModelId + "_offline_review.json"))
+				return "arquivo do relatório não corresponde ao identificador declarado";
+
+			JSONValue usage = getMapChild(report, "ai_usage");
+			if (!isFalseFlag(usage, "internet_api")
+					|| !isFalseFlag(usage, "llm_online")
+					|| !isFalseFlag(usage, "local_ai"))
+				return "modo offline sem IA não foi comprovado";
+			JSONValue llmAssist = getMapChild(report, "llm_online_assist");
+			if (!isFalseFlag(llmAssist, "enabled"))
+				return "relatório registra camada LLM habilitada";
+
+			Path statusFile = reportFile.getParent().resolve(actualModelId + "_suggestions_status.json");
+			if (!Files.isRegularFile(statusFile, LinkOption.NOFOLLOW_LINKS))
+				return "arquivo de status da mesma revisão não encontrado";
+			JSONValue statuses = readJsonFile(statusFile);
+			if (!actualModelId.equals(getStringChild(statuses, "model_id", "")))
+				return "arquivo de status pertence a outro modelo";
+			Path statusSource = resolveReportedSource(getStringChild(statuses, "input_file", ""), assistantRoot);
+			if (statusSource == null || !recorded.equals(statusSource))
+				return "origem do arquivo de status não corresponde ao relatório";
+
+			// New reports declare the actual interpreter that generated them.
+			// Legacy historical reports may omit it, but newly-run GUI reviews
+			// require it before declaring success in runLocalRclWorker().
+			JSONValue runtime = getMapChild(report, "python_runtime");
+			if (runtime != null) {
+				String runtimeError = checkReportedPythonRuntime(runtime, assistantRoot);
+				if (runtimeError != null)
+					return runtimeError;
+				JSONValue statusRuntime = getMapChild(statuses, "python_runtime");
+				if (statusRuntime == null || !sameRuntimeEvidence(runtime, statusRuntime))
+					return "metadados Python divergentes entre relatório e sugestões";
+			}
+			if (getMapChild(statuses, "suggestions") == null
+					|| !getMapChild(statuses, "suggestions").isList())
+				return "arquivo de status sem lista de sugestões";
+			return null;
+		}
+		catch (Exception ex) {
+			return "arquivo JSON não pôde ser validado: " + ex.getClass().getSimpleName();
+		}
+	}
+
+	/**
+	 * Locally cross-check self-reported Python evidence against current files.
+	 * This detects accidental interpreter/script drift, NOT a cryptographic
+	 * attestation of process integrity. Do not upload paths to public CI.
+	 */
+	private static String checkReportedPythonRuntime(JSONValue runtime, Path assistantRoot) {
+		if (runtime == null || !runtime.isMap()
+				|| !"jaam.ai.python_runtime.v1".equals(getStringChild(runtime, "schema", ""))
+				|| !"self_reported_no_external_attestation".equals(
+						getStringChild(runtime, "evidence_level", "")))
+			return "proveniência do Python ausente ou com esquema inesperado";
+		String version = getStringChild(runtime, "python_version", "");
+		String[] numbers = version.split("\\.");
+		try {
+			if (numbers.length < 3 || Integer.parseInt(numbers[0]) != 3
+					|| Integer.parseInt(numbers[1]) < 11
+					|| Integer.parseInt(numbers[2]) < 0)
+				return "versão Python do relatório não atende 3.11+";
+		}
+		catch (NumberFormatException ex) {
+			return "versão Python inválida no relatório";
+		}
+		String scriptPath = getStringChild(runtime, "entry_script", "");
+		String exePath = getStringChild(runtime, "python_executable", "");
+		if (scriptPath.isEmpty() || exePath.isEmpty())
+			return "caminhos do interpretador ou script não declarados";
+		try {
+			Path expectedScript = assistantRoot.resolve("python")
+					.resolve("modulo_ia_offline.py").toRealPath();
+			Path reportedScript = Paths.get(scriptPath);
+			Path reportedPython = Paths.get(exePath);
+			if (!reportedScript.isAbsolute() || !reportedPython.isAbsolute())
+				return "interpretador ou script Python sem caminho absoluto";
+			if (!expectedScript.equals(reportedScript.toRealPath()))
+				return "script Python do relatório não corresponde ao módulo configurado";
+			if (!Files.isRegularFile(reportedPython, LinkOption.NOFOLLOW_LINKS))
+				return "executável Python do relatório não encontrado";
+			if (!sha256File(expectedScript).equalsIgnoreCase(
+					getStringChild(runtime, "entry_script_sha256", "")))
+				return "SHA-256 do script Python não corresponde";
+			if (!sha256File(reportedPython).equalsIgnoreCase(
+					getStringChild(runtime, "python_executable_sha256", "")))
+				return "SHA-256 do executável Python não corresponde";
+			// The CMD selects an absolute interpreter. If the GUI inherited it,
+			// reject a different reported executable instead of just recording.
+			String pinnedPython = System.getenv("JAAMSIM_PYTHON");
+			if (pinnedPython != null && !pinnedPython.trim().isEmpty()) {
+				Path configured = Paths.get(pinnedPython.trim());
+				if (configured.isAbsolute() && Files.isRegularFile(configured)
+						&& !configured.toRealPath().equals(reportedPython.toRealPath()))
+					return "interpretador declarado não é o configurado pelo CMD";
+			}
+			return null;
+		}
+		catch (Exception ex) {
+			return "proveniência Python não verificável: " + ex.getClass().getSimpleName();
+		}
+	}
+
+	private static boolean sameRuntimeEvidence(JSONValue a, JSONValue b) {
+		if (a == null || b == null || !a.isMap() || !b.isMap())
+			return false;
+		for (String key : new String[] {
+				"schema", "python_executable", "python_executable_sha256",
+				"python_version", "entry_script", "entry_script_sha256"}) {
+			String value = getStringChild(a, key, "");
+			if (value.isEmpty() || !value.equals(getStringChild(b, key, "")))
+				return false;
+		}
+		return true;
+	}
+
+	private static boolean isFalseFlag(JSONValue parent, String key) {
+		JSONValue value = getMapChild(parent, key);
+		return value != null && value.isFalse();
+	}
+
+	private static Path resolveReportedSource(String raw, Path assistantRoot) {
+		if (raw == null || raw.trim().isEmpty())
+			return null;
+		Path recorded = Paths.get(raw);
+		if (!recorded.isAbsolute()) {
+			// modulo_ia_offline.display_path() relativizes to
+			// snapshot_analyzer.ROOT == assistant_paths.ASSISTANT_ROOT.
+			// The CMD and Java must resolve against this same directory.
+			recorded = assistantRoot.resolve(recorded);
+		}
+		return recorded.toAbsolutePath().normalize();
+	}
+
+	private static String sha256File(Path file) throws IOException {
+		MessageDigest md;
+		try {
+			md = MessageDigest.getInstance("SHA-256");
+		}
+		catch (NoSuchAlgorithmException ex) {
+			throw new IOException("SHA-256 não disponível", ex);
+		}
+		try (java.io.InputStream in = Files.newInputStream(file)) {
+			byte[] buf = new byte[32768];
+			int count;
+			while ((count = in.read(buf)) != -1)
+				md.update(buf, 0, count);
+		}
+		StringBuilder hash = new StringBuilder();
+		for (byte b : md.digest())
+			hash.append(String.format(Locale.ROOT, "%02x", b & 0xff));
+		return hash.toString();
+	}
+
+	private static void writeRclReceipt(Path outputDir, Path cfgFile, String modelId,
+			String beforeSha, String afterSha, String reportSha, JSONValue pythonRuntime,
+			RclRunResult result, String error, boolean complete)
+			throws IOException {
+		JSONValue receipt = JSONValue.makeObject();
+		receipt.mapVal.put("schema", JSONValue.makeStringVal("jaam.ai.offline_review.receipt.v1"));
+		receipt.mapVal.put("run_id", JSONValue.makeStringVal(outputDir.getFileName().toString()));
+		receipt.mapVal.put("utc_timestamp", JSONValue.makeStringVal(OffsetDateTime.now(ZoneOffset.UTC).toString()));
+		receipt.mapVal.put("source_cfg", JSONValue.makeStringVal(cfgFile.toAbsolutePath().normalize().toString()));
+		receipt.mapVal.put("model_id", JSONValue.makeStringVal(modelId));
+		receipt.mapVal.put("cfg_sha256_before", JSONValue.makeStringVal(beforeSha));
+		receipt.mapVal.put("cfg_sha256_after", afterSha == null
+				? JSONValue.makeNullVal() : JSONValue.makeStringVal(afterSha));
+		receipt.mapVal.put("cfg_unchanged", beforeSha.equals(afterSha)
+				? JSONValue.makeTrueVal() : JSONValue.makeFalseVal());
+		receipt.mapVal.put("report_sha256", reportSha == null
+				? JSONValue.makeNullVal() : JSONValue.makeStringVal(reportSha));
+		// Recorded by the Python process; self-reported, NOT a signed attestation.
+		receipt.mapVal.put("python_runtime", pythonRuntime == null
+				? JSONValue.makeNullVal() : pythonRuntime);
+		receipt.mapVal.put("exit_code", JSONValue.makeNumVal(result == null ? -1 : result.exitCode));
+		receipt.mapVal.put("outcome", JSONValue.makeStringVal(complete ? "COMPLETE_OFFLINE" : "FAILED_OR_BLOCKED"));
+		receipt.mapVal.put("finished", result != null && result.finished
+				? JSONValue.makeTrueVal() : JSONValue.makeFalseVal());
+		receipt.mapVal.put("output_directory", JSONValue.makeStringVal(outputDir.toAbsolutePath().toString()));
+		receipt.mapVal.put("origin", JSONValue.makeStringVal("JAAMSIM_GUI_RCL"));
+		receipt.mapVal.put("error", error == null ? JSONValue.makeNullVal() : JSONValue.makeStringVal(error));
+		receipt.mapVal.put("automatic_model_changes", JSONValue.makeFalseVal());
+		receipt.mapVal.put("external_llm_invoked", JSONValue.makeFalseVal());
+		receipt.mapVal.put("p004_inference_authorized", JSONValue.makeFalseVal());
+		receipt.mapVal.put("full45_authorized", JSONValue.makeFalseVal());
+		Path target = outputDir.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json");
+		Path temporary = outputDir.resolve("JAAM_AI_OFFLINE_REVIEW_RECEIPT.json.tmp");
+		Files.write(temporary, (JSONWriter.writeJSONValue(receipt) + System.lineSeparator())
+				.getBytes(StandardCharsets.UTF_8));
+		Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
 	}
 
 	private static String buildSuggestionSummary(Path statusFile) throws Exception {
@@ -2664,10 +3170,19 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static Path findAssistantRoot(File cfgFile) {
-		ArrayList<Path> candidates = new ArrayList<>();
-		addConfiguredCandidate(candidates, System.getProperty("jaamsim.assistant.root"));
-		addConfiguredCandidate(candidates, System.getenv("JAAMSIM_ASSISTANT_ROOT"));
+		// An explicitly configured extension is authoritative. If missing,
+		// never silently execute another Python module found near the CFG or
+		// in the JVM working directory. This applies equally to GUI and StatFit.
+		// The original CMD verifies the native package before setting this
+		// environment root. Do not let -Djaamsim.assistant.root supersede it.
+		String configuredRoot = AssistantLaunchSettings.preferLauncherEnvironment(
+				System.getenv("JAAMSIM_ASSISTANT_ROOT"),
+				System.getProperty("jaamsim.assistant.root"));
+		if (configuredRoot != null)
+			return resolveAssistantRootCandidate(Paths.get(configuredRoot), "modulo_ia_offline.py");
 
+		// Legacy discovery is allowed only when neither source configured a root.
+		ArrayList<Path> candidates = new ArrayList<>();
 		Path currentDir = Paths.get("").toAbsolutePath();
 		candidates.add(currentDir);
 
@@ -2719,9 +3234,11 @@ public class AIAssistantBox extends FrameBox {
 		command.add("jaamsim-gui");
 		command.add("--profile");
 		command.add("beginner");
-		if (Files.isRegularFile(statusFile)) {
+		if (statusFile != null && Files.isRegularFile(statusFile)) {
 			command.add("--status-file");
 			command.add(statusFile.toString());
+			// The file hash alone does not freeze suggestion ordering across RCL versions.
+			command.add("--strict-status-identity");
 		}
 		return command;
 	}
@@ -2792,12 +3309,12 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static String resolvePythonCommand() {
-		String configured = System.getProperty("jaamsim.python");
-		if (configured == null || configured.trim().isEmpty())
-			configured = System.getenv("JAAMSIM_PYTHON");
-		if (configured == null || configured.trim().isEmpty())
-			return "python";
-		return configured.trim();
+		// Same trust boundary as the configured assistant root. In a CMD
+		// launch, JAAMSIM_PYTHON is the interpreter validated on option 8.
+		String configured = AssistantLaunchSettings.preferLauncherEnvironment(
+				System.getenv("JAAMSIM_PYTHON"),
+				System.getProperty("jaamsim.python"));
+		return configured == null ? "python" : configured;
 	}
 
 	private static String buildModelId(File cfgFile) {

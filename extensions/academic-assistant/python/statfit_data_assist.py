@@ -27,6 +27,7 @@ import statfit_auxiliar
 import tcc_llm_assist
 
 import assistant_paths
+import runtime_provenance
 
 
 ROOT = assistant_paths.ASSISTANT_ROOT
@@ -505,6 +506,7 @@ def prepare_data(args: argparse.Namespace) -> tuple[PreparedDataReport, list[dic
     )
     payload = asdict(report)
     payload["provider_attempts"] = attempts
+    payload["python_runtime"] = runtime_provenance.capture_runtime(Path(__file__))
     json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     md_path.write_text(render_markdown(report, attempts), encoding="utf-8")
     return report, attempts

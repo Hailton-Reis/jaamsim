@@ -105,5 +105,120 @@ class SnapshotAnalyzerTest(unittest.TestCase):
         )
 
 
+    def test_rcl23_requires_capacity_for_real_used_resource_not_pool_or_unit(self):
+        snapshot = {
+            "model_id": "resource_types",
+            "case_id": "RESOURCE",
+            "variant": "synthetic",
+            "title": "Resource semantics",
+            "objective": "Test capacity keyword contract",
+            "components": [],
+            "connections": [],
+            "resources": [
+                {
+                    "id": "worker_missing",
+                    "name": "Worker Missing",
+                    "jaamsim_class": "Resource",
+                    "provenance": "CFG_DECLARED_RESOURCE",
+                    "parameters": {"SomeInput": "x"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "worker_defined",
+                    "name": "Worker Defined",
+                    "jaamsim_class": "Resource",
+                    "parameters": {"Capacity": "3"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "pool",
+                    "name": "Pool",
+                    "jaamsim_class": "ResourcePool",
+                    "parameters": {"Note": "members"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "unit",
+                    "name": "Unit",
+                    "jaamsim_class": "ResourceUnit",
+                    "parameters": {"ResourcePool": "Pool"},
+                    "used_by": ["seize_a"],
+                },
+                {
+                    "id": "old_placeholder",
+                    "name": "Old Placeholder",
+                    "provenance": "DERIVED_PROCESS_CAPACITY_PLACEHOLDER",
+                    "parameters": {"SomeInput": "historical"},
+                    "used_by": ["server"],
+                },
+            ],
+            "metrics": [],
+            "assumptions": [],
+        }
+        alerts = analyzer.analyze_snapshot(snapshot)
+        missing_capacity_ids = {
+            item.component_id for item in alerts if item.rule_id == "RCL23"
+        }
+        self.assertEqual({"worker_missing"}, missing_capacity_ids)
+
+
+    def test_rcl24_checks_temporal_values_and_named_distributions(self):
+        def check(service_time, *, setup_time=None):
+            params = {"ServiceTime": service_time}
+            if setup_time is not None:
+                params["SetupTime"] = setup_time
+            snapshot = {
+                "model_id": "temporal",
+                "case_id": "RCL24",
+                "variant": "synthetic",
+                "title": "Temporal units",
+                "objective": "Teste",
+                "components": [
+                    {
+                        "id": "source", "name": "Chegada", "type": "source",
+                        "parameters": {"InterArrivalTime": "DistChegadas"},
+                    },
+                    {
+                        "id": "server", "name": "Atendimento", "type": "process",
+                        "parameters": params,
+                    },
+                    {"id": "sink", "name": "Saida", "type": "sink"},
+                ],
+                "connections": [
+                    {"from": "source", "to": "server", "type": "entity_flow"},
+                    {"from": "server", "to": "sink", "type": "entity_flow"},
+                ],
+                "resources": [],
+                "metrics": [],
+                "assumptions": [],
+                "distributions": [
+                    {
+                        "id": "dist_chegadas",
+                        "name": "Dist Chegadas",
+                        "jaamsim_name": "DistChegadas",
+                        "type": "ExponentialDistribution",
+                        "parameters": {"Mean": "2 min"},
+                    }
+                ],
+            }
+            return [
+                item for item in analyzer.analyze_snapshot(snapshot)
+                if item.rule_id == "RCL24"
+            ]
+
+        self.assertEqual([], check("0.85 s"))
+        self.assertEqual([], check("5 min"))
+        self.assertEqual([], check("DistChegadas"))
+        self.assertEqual([], check("Dist Chegadas"))
+        without_unit = check("0.85 s", setup_time="7")
+        self.assertEqual(1, len(without_unit))
+        self.assertEqual(
+            [{"parameter": "SetupTime", "value": "7"}],
+            without_unit[0].evidence["temporal_parameters_without_evident_unit"],
+        )
+        self.assertEqual(1, len(check("1")))
+        self.assertEqual(1, len(check("UndefinedDistribution")))
+
+
 if __name__ == "__main__":
     unittest.main()

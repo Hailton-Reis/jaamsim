@@ -44,6 +44,9 @@ class ModuloIaOfflineTest(unittest.TestCase):
         self.assertFalse(payload["ai_usage"]["llm_online"])
         self.assertFalse(payload["ai_usage"]["local_ai"])
         self.assertFalse(payload["llm_online_assist"]["enabled"])
+        self.assertEqual("jaam.ai.python_runtime.v1", payload["python_runtime"]["schema"])
+        self.assertEqual(payload["python_runtime"], suggestion_status["python_runtime"])
+        self.assertEqual(64, len(payload["python_runtime"]["entry_script_sha256"]))
         self.assertIn("suggestion_decision_audit_file", payload)
         self.assertEqual(4, len(payload["local_suggestions"]))
         self.assertEqual(4, len(payload["suggestion_decision_audit"]))
@@ -284,6 +287,125 @@ class ModuloIaOfflineTest(unittest.TestCase):
         self.assertEqual(2, len(reviewed["connections"]))
         self.assertIn("topologia preservada", reviewed["notes"])
         self.assertEqual(3, len(change_plan["allowed_changes"]))
+
+
+    def test_cfg_parser_warnings_reach_json_markdown_and_native_cli(self):
+        import io
+        import sys
+        from contextlib import redirect_stdout
+        from unittest.mock import patch
+
+        cfg = """RecordEdits
+Define EntityGenerator { Gen }
+Define Mystery { Missing }
+Gen NextComponent { Missing }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "unresolved.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            out = root / "output"
+            result = offline.review_input(path, out)
+            report = json.loads(Path(result.output_json_file).read_text(encoding="utf-8"))
+            markdown = Path(result.output_markdown_file).read_text(encoding="utf-8")
+
+            self.assertEqual("R001-v6-bridge", result.parser_schema_version)
+            self.assertEqual(1, len(result.parser_warnings))
+            self.assertEqual(
+                "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET",
+                result.parser_warnings[0]["type"],
+            )
+            self.assertEqual("Missing", result.parser_warnings[0]["target"])
+            self.assertEqual(1, report["parser_diagnostics"]["warning_count"])
+            self.assertTrue(report["parser_diagnostics"]["independent_of_rcl"])
+            self.assertIn("Diagnosticos do parser CFG", markdown)
+            self.assertIn("UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET", markdown)
+
+            with patch.object(sys, "argv", ["modulo_ia_offline.py", str(path), "--output-dir", str(out)]):
+                stdout = io.StringIO()
+                with redirect_stdout(stdout):
+                    offline.main()
+            self.assertIn("Diagnosticos parser: 1 avisos", stdout.getvalue())
+            self.assertIn("ATENCAO: cobertura parcial de CFG", stdout.getvalue())
+
+    def test_clean_json_review_has_no_parser_warning(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_referencia.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            result = offline.review_input(snapshot, Path(tmp))
+            report = json.loads(Path(result.output_json_file).read_text(encoding="utf-8"))
+        self.assertEqual([], result.parser_warnings)
+        self.assertEqual(0, report["parser_diagnostics"]["warning_count"])
+
+
+    def test_strict_transfer_reuses_only_exact_same_suggestion_identity(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_inconsistente.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initial = offline.review_input(snapshot, root / "first")
+            old_status = Path(initial.output_suggestions_file)
+            payload = json.loads(old_status.read_text(encoding="utf-8"))
+            payload["suggestions"][0]["status"] = "accepted"
+            payload["suggestions"][0]["status_actor"] = "operador"
+            payload["suggestions"][1]["status"] = "rejected"
+            old_status.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            result = offline.review_input(
+                snapshot, root / "second",
+                status_file=old_status, strict_status_identity=True,
+            )
+            report = json.loads(Path(result.output_json_file).read_text(encoding="utf-8"))
+            md = Path(result.output_markdown_file).read_text(encoding="utf-8")
+
+        self.assertEqual(["accepted", "rejected"], [s.status for s in result.local_suggestions[:2]])
+        self.assertEqual(4, result.status_transfer["imported"])
+        self.assertEqual([], result.status_transfer["rejected"])
+        self.assertTrue(report["status_transfer"]["strict_identity_required"])
+        self.assertIn("Decisoes importadas: 4", md)
+        self.assertEqual("status_file", result.suggestion_audit[0].status_source)
+
+    def test_strict_transfer_blocks_stale_or_incomplete_suggestion_ids(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_inconsistente.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            initial = offline.review_input(snapshot, root / "first")
+            old_status = Path(initial.output_suggestions_file)
+            payload = json.loads(old_status.read_text(encoding="utf-8"))
+            payload["suggestions"][0]["status"] = "accepted"
+            payload["suggestions"][0]["rule_id"] = "RCL999"
+            payload["suggestions"][1]["status"] = "accepted"
+            payload["suggestions"][1]["suggested_change"] = "outro texto"
+            payload["suggestions"][2]["status"] = "rejected"
+            payload["suggestions"][2].pop("action_type")
+            payload["suggestions"][3]["status"] = "accepted"
+            old_status.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+            result = offline.review_input(
+                snapshot, root / "second",
+                status_file=old_status, strict_status_identity=True,
+            )
+            report = json.loads(Path(result.output_json_file).read_text(encoding="utf-8"))
+
+        self.assertEqual(["pending", "pending", "pending", "accepted"],
+                         [s.status for s in result.local_suggestions])
+        self.assertEqual(1, report["status_transfer"]["imported"])
+        self.assertEqual(3, len(report["status_transfer"]["rejected"]))
+        self.assertEqual("generated_default", result.suggestion_audit[0].status_source)
+        self.assertEqual("status_file", result.suggestion_audit[3].status_source)
+
+    def test_strict_transfer_rejects_legacy_id_only_status_map(self):
+        snapshot = offline.snapshot_analyzer.CASES_DIR / "c1_fila_simples_inconsistente.json"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            statuses = root / "status.json"
+            statuses.write_text(json.dumps({"suggestions": {"SUG001": "accepted"}}), encoding="utf-8")
+            strict = offline.review_input(
+                snapshot, root / "strict", status_file=statuses,
+                strict_status_identity=True,
+            )
+            legacy = offline.review_input(snapshot, root / "legacy", status_file=statuses)
+
+        self.assertEqual("pending", strict.local_suggestions[0].status)
+        self.assertEqual("accepted", legacy.local_suggestions[0].status)
+        self.assertEqual(1, len(strict.status_transfer["rejected"]))
+        self.assertFalse(legacy.status_transfer["strict_identity_required"])
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ import snapshot_analyzer
 import tcc_llm_assist
 
 import assistant_paths
+import runtime_provenance
 
 
 DEFAULT_OUTPUT_DIR = assistant_paths.OUTPUT_DIR / "offline-review"
@@ -49,6 +50,9 @@ class OfflineReviewResult:
     local_suggestions: list["LocalSuggestion"]
     allowed_changes: list["AllowedChange"]
     suggestion_audit: list["SuggestionDecisionAudit"]
+    parser_schema_version: str | None
+    parser_warnings: list[dict[str, Any]]
+    status_transfer: dict[str, Any]
 
 
 @dataclass
@@ -467,6 +471,9 @@ def load_suggestion_statuses(status_file: Path | None) -> dict[str, dict[str, st
                 "status_actor": str(entry.get("status_actor", entry.get("actor", ""))),
                 "status_updated_at": str(entry.get("status_updated_at", entry.get("updated_at", ""))),
             }
+            for identity_key in ("rule_id", "component_id", "action_type", "suggested_change"):
+                if identity_key in entry:
+                    normalized[identity_key] = str(entry[identity_key])
         else:
             raise ValueError(f"Status invalido para {suggestion_id}: {entry}")
         if status not in ALLOWED_SUGGESTION_STATUSES:
@@ -474,6 +481,42 @@ def load_suggestion_statuses(status_file: Path | None) -> dict[str, dict[str, st
             raise ValueError(f"Status invalido para {suggestion_id}: {status}. Permitidos: {allowed}")
         statuses[str(suggestion_id)] = normalized
     return statuses
+
+
+def filter_status_transfers(
+    suggestions: list[LocalSuggestion],
+    imported: dict[str, dict[str, str]],
+    *,
+    strict_identity: bool,
+) -> tuple[dict[str, dict[str, str]], dict[str, Any]]:
+    """Never attach an old SUG001 decision to a new rule after engine changes."""
+    if not strict_identity:
+        return imported, {"strict_identity_required": False, "imported": len(imported), "rejected": []}
+
+    indexed = {item.suggestion_id: item for item in suggestions}
+    accepted: dict[str, dict[str, str]] = {}
+    rejected: list[dict[str, str]] = []
+    for suggestion_id, override in imported.items():
+        current = indexed.get(suggestion_id)
+        if current is None:
+            rejected.append({"suggestion_id": suggestion_id, "reason": "suggestion_id_missing"})
+            continue
+        expected = {
+            "rule_id": current.rule_id,
+            "component_id": current.component_id,
+            "action_type": current.action_type,
+            "suggested_change": current.suggested_change,
+        }
+        if any(override.get(key) != value for key, value in expected.items()):
+            rejected.append({
+                "suggestion_id": suggestion_id,
+                "reason": "identity_missing_or_changed",
+                "current_rule_id": current.rule_id,
+                "recorded_rule_id": override.get("rule_id", ""),
+            })
+            continue
+        accepted[suggestion_id] = override
+    return accepted, {"strict_identity_required": True, "imported": len(accepted), "rejected": rejected}
 
 
 def apply_suggestion_statuses(
@@ -643,6 +686,8 @@ def profile_guidance(suggestion: LocalSuggestion, user_profile: str) -> str:
 def render_offline_markdown(
     analysis: snapshot_analyzer.Analysis,
     *,
+    parser_schema_version: str | None,
+    parser_warnings: list[dict[str, Any]],
     input_file: str,
     input_type: str,
     generated_snapshot_file: str | None,
@@ -651,6 +696,7 @@ def render_offline_markdown(
     local_suggestions: list[LocalSuggestion],
     allowed_changes: list[AllowedChange],
     suggestion_audit: list[SuggestionDecisionAudit],
+    status_transfer: dict[str, Any],
     llm_assist_enabled: bool,
     llm_assist_markdown_file: str | None,
     reviewed_snapshot_file: str | None,
@@ -711,6 +757,23 @@ def render_offline_markdown(
                 "",
             ]
         )
+
+    lines.extend([
+        "## Diagnosticos do parser CFG",
+        "",
+        f"- Esquema do parser: `{parser_schema_version or 'nao informado'}`",
+        f"- Avisos de leitura: `{len(parser_warnings)}`",
+        "",
+    ])
+    if parser_warnings:
+        lines.append("Atencao: avisos do parser indicam limites de cobertura ou de leitura; nao sao regras RCL.")
+        lines.append("Verifique estes pontos antes de usar o snapshot como evidencia final.")
+        lines.append("")
+        for index, warning in enumerate(parser_warnings, start=1):
+            lines.append(f"- Aviso {index}: `{json.dumps(warning, ensure_ascii=False)}`")
+        lines.append("")
+    else:
+        lines.extend(["Nenhum aviso de leitura do parser registrado.", ""])
 
     lines.extend(["## Sugestoes locais estruturadas", ""])
     if not local_suggestions:
@@ -808,6 +871,17 @@ def render_offline_markdown(
                 "",
             ]
         )
+    lines.extend([
+        "",
+        "## Transferencia de decisoes entre revisoes",
+        "",
+        "- Verificacao de identidade estrita: " + str(status_transfer["strict_identity_required"]),
+        "- Decisoes importadas: " + str(status_transfer["imported"]),
+        "- Decisoes rejeitadas: " + str(len(status_transfer["rejected"])),
+        "",
+    ])
+    for rejected in status_transfer["rejected"]:
+        lines.append("- Decisao ignorada: " + rejected["suggestion_id"] + " / " + rejected["reason"])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -815,6 +889,8 @@ def write_offline_outputs(
     analysis: snapshot_analyzer.Analysis,
     output_dir: Path,
     *,
+    parser_schema_version: str | None,
+    parser_warnings: list[dict[str, Any]],
     input_file: str,
     input_type: str,
     generated_snapshot_file: str | None,
@@ -823,12 +899,14 @@ def write_offline_outputs(
     local_suggestions: list[LocalSuggestion],
     allowed_changes: list[AllowedChange],
     suggestion_audit: list[SuggestionDecisionAudit],
+    status_transfer: dict[str, Any],
     llm_assist_enabled: bool,
     llm_assist_json_file: str | None,
     llm_assist_markdown_file: str | None,
     reviewed_snapshot_file: str | None,
 ) -> tuple[Path, Path, Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    python_runtime = runtime_provenance.capture_runtime(Path(__file__))
     json_path = output_dir / f"{analysis.model_id}_offline_review.json"
     markdown_path = output_dir / f"{analysis.model_id}_offline_review.md"
     suggestions_path = output_dir / f"{analysis.model_id}_suggestions_status.json"
@@ -843,6 +921,12 @@ def write_offline_outputs(
         },
         "input_file": input_file,
         "input_type": input_type,
+        "parser_diagnostics": {
+            "schema_version": parser_schema_version,
+            "warning_count": len(parser_warnings),
+            "warnings": parser_warnings,
+            "independent_of_rcl": True,
+        },
         "user_profile": user_profile,
         "suggestion_status_file": display_path(suggestions_path),
         "suggestion_decision_audit_file": display_path(audit_path),
@@ -863,12 +947,15 @@ def write_offline_outputs(
         "allowed_changes": [asdict(change) for change in allowed_changes],
         "suggestion_decision_audit": [asdict(audit) for audit in suggestion_audit],
         "local_suggestions": [asdict(suggestion) for suggestion in local_suggestions],
+        "status_transfer": status_transfer,
+        "python_runtime": python_runtime,
         "analysis": asdict(analysis),
     }
     suggestions_payload = {
         "model_id": analysis.model_id,
         "input_file": input_file,
         "allowed_statuses": sorted(ALLOWED_SUGGESTION_STATUSES),
+        "python_runtime": python_runtime,
         "instructions": (
             "Edite apenas os campos status/status_reason/status_actor/status_updated_at. "
             "Status aceito nao aplica alteracao automaticamente."
@@ -904,6 +991,8 @@ def write_offline_outputs(
     markdown_path.write_text(
         render_offline_markdown(
             analysis,
+            parser_schema_version=parser_schema_version,
+            parser_warnings=parser_warnings,
             input_file=input_file,
             input_type=input_type,
             generated_snapshot_file=generated_snapshot_file,
@@ -912,6 +1001,7 @@ def write_offline_outputs(
             local_suggestions=local_suggestions,
             allowed_changes=allowed_changes,
             suggestion_audit=suggestion_audit,
+            status_transfer=status_transfer,
             llm_assist_enabled=llm_assist_enabled,
             llm_assist_markdown_file=llm_assist_markdown_file,
             reviewed_snapshot_file=reviewed_snapshot_file,
@@ -935,6 +1025,7 @@ def review_input(
     objective: str | None = None,
     user_profile: str = "beginner",
     status_file: Path | None = None,
+    strict_status_identity: bool = False,
     apply_safe_changes: bool = False,
     llm_assist: bool = False,
     llm_provider_order: str | None = None,
@@ -966,9 +1057,19 @@ def review_input(
     else:
         snapshot_path = input_path
 
+    # Parser warnings must reach the native assistant, not be buried only
+    # in the generated snapshot. Keep them separate from deterministic RCLs.
+    parsed_snapshot = json.loads(snapshot_path.read_text(encoding="utf-8-sig"))
+    parser_schema_version = parsed_snapshot.get("parser_schema_version")
+    raw_warnings = parsed_snapshot.get("parser_warnings", [])
+    parser_warnings = [w for w in raw_warnings if isinstance(w, dict)] if isinstance(raw_warnings, list) else []
+
     analysis = build_analysis_from_snapshot(snapshot_path, expectations, evaluate_expected_rules=use_matrix)
     local_suggestions = build_local_suggestions(analysis)
     status_overrides = load_suggestion_statuses(status_file)
+    status_overrides, status_transfer = filter_status_transfers(
+        local_suggestions, status_overrides, strict_identity=strict_status_identity,
+    )
     local_suggestions = apply_suggestion_statuses(local_suggestions, status_overrides)
     allowed_changes = build_allowed_changes(local_suggestions)
     suggestion_audit = build_suggestion_audit(local_suggestions, allowed_changes, status_overrides)
@@ -982,6 +1083,8 @@ def review_input(
     json_path, markdown_path, suggestions_path, change_plan_path, audit_path = write_offline_outputs(
         analysis,
         output_dir,
+        parser_schema_version=parser_schema_version,
+        parser_warnings=parser_warnings,
         input_file=display_path(input_path),
         input_type=detected_type,
         generated_snapshot_file=generated_snapshot_file,
@@ -990,6 +1093,7 @@ def review_input(
         local_suggestions=local_suggestions,
         allowed_changes=allowed_changes,
         suggestion_audit=suggestion_audit,
+        status_transfer=status_transfer,
         llm_assist_enabled=llm_assist,
         llm_assist_json_file=llm_assist_json_file,
         llm_assist_markdown_file=llm_assist_markdown_file,
@@ -1023,6 +1127,9 @@ def review_input(
         local_suggestions=local_suggestions,
         allowed_changes=allowed_changes,
         suggestion_audit=suggestion_audit,
+        parser_schema_version=parser_schema_version,
+        parser_warnings=parser_warnings,
+        status_transfer=status_transfer,
     )
 
 
@@ -1111,6 +1218,11 @@ def parse_args() -> argparse.Namespace:
         help="JSON opcional com status de sugestoes para reprocessar aceite/rejeicao.",
     )
     parser.add_argument(
+        "--strict-status-identity",
+        action="store_true",
+        help="Reaproveita somente sugestoes com identidade de regra, componente, acao e texto iguais.",
+    )
+    parser.add_argument(
         "--apply-safe-changes",
         action="store_true",
         help="Gera copia de snapshot apenas com mudancas seguras de metadados aceitas.",
@@ -1172,6 +1284,7 @@ def main() -> None:
             objective=args.objective,
             user_profile=args.profile,
             status_file=args.status_file,
+            strict_status_identity=args.strict_status_identity,
             apply_safe_changes=args.apply_safe_changes,
             llm_assist=args.llm_assist,
             llm_provider_order=args.llm_provider_order,
@@ -1189,6 +1302,13 @@ def main() -> None:
             f"{result.analysis.model_id}: {len(result.analysis.alerts)} alertas, "
             f"{len(result.local_suggestions)} sugestoes locais ({rules})"
         )
+        print(f"  Diagnosticos parser: {len(result.parser_warnings)} avisos")
+        if result.parser_warnings:
+            print("  ATENCAO: cobertura parcial de CFG; confira os detalhes no relatorio Markdown.")
+            for warning in result.parser_warnings[:8]:
+                print(f"    - {warning.get('type', 'UNKNOWN')}: {warning.get('object') or warning.get('target') or warning.get('encoding') or 'ver detalhes'}")
+            if len(result.parser_warnings) > 8:
+                print(f"    ... {len(result.parser_warnings) - 8} avisos adicionais no relatorio.")
         print(f"  Markdown: {result.output_markdown_file}")
         print(f"  Status sugestoes: {result.output_suggestions_file}")
         print(f"  Plano de mudancas: {result.output_change_plan_file}")

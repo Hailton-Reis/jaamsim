@@ -41,6 +41,8 @@ class StatFitAuxiliarTest(unittest.TestCase):
         self.assertIn(report.data_quality_level, {"fraca", "triagem_com_cautela", "triagem_consistente"})
         self.assertIn(report.best_distribution, {"normal", "lognormal", "exponential", "uniform", "triangular"})
         self.assertTrue(payload["candidates"])
+        self.assertEqual("jaam.ai.python_runtime.v1", payload["python_runtime"]["schema"])
+        self.assertEqual(64, len(payload["python_runtime"]["python_executable_sha256"]))
         self.assertIn("histogram", payload)
         self.assertIn("empirical_cdf", payload)
         self.assertIn("qq_points", payload)

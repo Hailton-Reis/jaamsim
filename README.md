@@ -19,6 +19,23 @@ Simulation software can execute a syntactically valid model while conceptual omi
 
 The prototype can inspect a structured model snapshot and report conditions such as disconnected flow, queue or process endpoints, unused resources, missing metrics, undocumented decision rules, and insufficient model structure. Every finding identifies the deterministic rule that produced it.
 
+## Central Windows launcher (existing shortcut preserved)
+
+The **original** `RODAR_JAAM_AI_COMPLETO.cmd` belongs to the private
+`00_PROJETO_ATUAL` workspace on Google Drive. Its v0.50 baseline and
+intermediate releases are preserved as historical backups. The current
+private engineering candidate is v0.69, built by updating the **same
+central CMD file**; it is not installed or manually accepted on Windows.
+The existing shortcut path is preserved. Menu options 1-11, MC-001
+options 1-7, and P004/Full45 DENY restrictions remain in the central CMD.
+
+**This repository intentionally does not contain or replace the
+self-contained private launcher.** Its build artifact is only the
+`JAAM_AI_NATIVE` Java/Python module to place beside the main CMD.
+No alternate Windows launcher is created.
+
+More details: [central integration](docs/academic-assistant/CENTRAL_LAUNCHER.md).
+
 ## Architecture
 
 The JaamSim batch evidence and the conceptual review are parallel branches. A `.dat` file is **not** converted into a snapshot.

@@ -61,10 +61,8 @@ MetricUtilizacaoServidor DataSource { [ServerAtendimento].State }
             ],
             snapshot["connections"],
         )
-        self.assertEqual(
-            [{"id": "capacidade_server_atendimento", "name": "Capacidade de Server Atendimento", "used_by": ["server_atendimento"]}],
-            snapshot["resources"],
-        )
+        # A Server is not an explicitly declared JaamSim Resource.
+        self.assertEqual([], snapshot["resources"])
         self.assertEqual(
             ["Tempo medio de espera", "Clientes atendidos", "Utilizacao do servidor"],
             [item["name"] for item in snapshot["metrics"]],
@@ -100,6 +98,240 @@ Atendimento NextComponent { Saida }
         self.assertIn("RCL13", triggered)
         self.assertIn("RCL26", triggered)
         self.assertNotIn("RCL12", triggered)
+
+
+    def test_declared_resources_use_seize_release_and_pool_references(self):
+        cfg = """RecordEdits
+Define EntityGenerator { SourceA }
+Define EntitySink { SinkA }
+Define Resource { WorkerA WorkerAA WorkerUnused }
+Define ResourcePool { CrewPool }
+Define ResourceUnit { CrewUnit }
+Define Seize { SeizeWorker SeizePool }
+Define Release { ReleaseWorker }
+SourceA NextComponent { SinkA }
+SeizeWorker ResourceList { WorkerA WorkerAA }
+ReleaseWorker Resource { WorkerA }
+SeizePool ResourceList { CrewPool }
+CrewUnit ResourcePool { CrewPool }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "resource-links.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        resources = {item["id"]: item for item in snapshot["resources"]}
+        self.assertEqual(
+            {"worker_a", "worker_aa", "worker_unused", "crew_pool", "crew_unit"},
+            set(resources),
+        )
+        self.assertEqual(["seize_worker", "release_worker"], resources["worker_a"]["used_by"])
+        self.assertEqual(["seize_worker"], resources["worker_aa"]["used_by"])
+        self.assertEqual([], resources["worker_unused"]["used_by"])
+        self.assertEqual(["seize_pool"], resources["crew_pool"]["used_by"])
+        self.assertEqual(["seize_pool"], resources["crew_unit"]["used_by"])
+        self.assertEqual("Resource", resources["worker_a"]["jaamsim_class"])
+        resource_alerts = {
+            item.component_id
+            for item in snapshot_analyzer.analyze_snapshot(snapshot)
+            if item.rule_id == "RCL03"
+        }
+        self.assertEqual({"worker_unused"}, resource_alerts)
+
+    def test_resource_reference_uses_exact_object_name(self):
+        cfg = """RecordEdits
+Define Resource { Worker Worker2 }
+Define Seize { SeizeWorker2 }
+SeizeWorker2 ResourceList { Worker2 }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "resource-exact.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        resources = {item["id"]: item for item in snapshot["resources"]}
+        self.assertEqual([], resources["worker"]["used_by"])
+        self.assertEqual(["seize_worker2"], resources["worker2"]["used_by"])
+
+
+    def test_multiline_cp1252_quoted_names_and_resource_capacity(self):
+        cfg = """RecordEdits
+# Premissa: Atendimento com referência explícita à equipe.
+Define EntityGenerator { 'Gerador Principal' }
+Define Queue {
+    'Fila de Espera'
+}
+Define Seize { 'Seize Worker' }
+Define EntitySink { 'Saida Final' }
+Define Resource { Worker1 }
+'Gerador Principal' NextComponent {
+    'Fila de Espera'
+}
+'Seize Worker' WaitQueue { 'Fila de Espera' }
+'Seize Worker' NextComponent { 'Saida Final' }
+'Seize Worker' ResourceList { Worker1 }
+Worker1 Capacity { 2 }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "multiline_quoted.cfg"
+            path.write_bytes(cfg.encode("cp1252"))
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        self.assertEqual("R001-v6-bridge", snapshot["parser_schema_version"])
+        self.assertEqual(4, len(snapshot["components"]))
+        self.assertEqual(
+            [
+                {"from": "gerador_principal", "to": "fila_de_espera", "type": "entity_flow"},
+                {"from": "fila_de_espera", "to": "seize_worker", "type": "entity_flow"},
+                {"from": "seize_worker", "to": "saida_final", "type": "entity_flow"},
+            ],
+            snapshot["connections"],
+        )
+        self.assertEqual(["Atendimento com referência explícita à equipe."], snapshot["assumptions"])
+        resource = snapshot["resources"][0]
+        self.assertEqual(["seize_worker"], resource["used_by"])
+        self.assertEqual({"Capacity": "2"}, resource["parameters"])
+        self.assertEqual("CFG_DECLARED_RESOURCE", resource["provenance"])
+        self.assertNotIn(
+            "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET",
+            [w["type"] for w in snapshot["parser_warnings"]],
+        )
+        self.assertIn(
+            "SOURCE_ENCODING_FALLBACK",
+            [w["type"] for w in snapshot["parser_warnings"]],
+        )
+        rules = {a.rule_id for a in snapshot_analyzer.analyze_snapshot(snapshot)}
+        self.assertNotIn("RCL04", rules)
+        self.assertNotIn("RCL23", rules)
+
+    def test_utf8_bom_and_metric_lineage(self):
+        cfg = """RecordEdits
+Define Queue { QueueA }
+Define Text { 'Metric Queue' }
+'Metric Queue' Format { 'Tempo medio = %.2f s' }
+'Metric Queue' DataSource { [QueueA].AverageQueueTime }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "metric.cfg"
+            path.write_text(cfg, encoding="utf-8-sig")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        self.assertEqual([], snapshot["parser_warnings"])
+        self.assertEqual(1, len(snapshot["metrics"]))
+        metric = snapshot["metrics"][0]
+        self.assertEqual("metric_metric_queue", metric["id"])
+        self.assertEqual("queue_a", metric["target"])
+        self.assertEqual("[QueueA].AverageQueueTime", metric["data_source"])
+        self.assertEqual("Metric Queue", metric["source_object"])
+        self.assertEqual("Text", metric["source_class"])
+        self.assertTrue(metric["requires_data_source"])
+        self.assertEqual("CFG_DATASOURCE", metric["provenance"])
+
+    def test_unparsed_statements_and_unresolved_links_are_reported(self):
+        cfg = """RecordEdits
+Define EntityGenerator { Generator }
+Define Mystery { Secret }
+Generator NextComponent { Secret }
+Broken invalid input
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "unknown.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        warnings = snapshot["parser_warnings"]
+        self.assertEqual(
+            {"UNPARSED_STATEMENT", "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET"},
+            {item["type"] for item in warnings},
+        )
+        self.assertEqual([], snapshot["connections"])
+        link = next(item for item in warnings if item["type"] == "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET")
+        self.assertEqual("Secret", link["target"])
+        self.assertEqual("Mystery", link["target_class"])
+
+    def test_duplicate_edges_and_custom_submodel_partial_warning(self):
+        cfg = """RecordEdits
+Define SubModel { Workstation }
+Define Workstation { Workstation1 }
+Define EntityGenerator { Source }
+Define Duplicate { Split }
+Define EntitySink { Sink1 Sink2 }
+Source NextComponent { Split }
+Split NextComponent { Sink1 }
+Split TargetComponentList { Workstation1 Sink2 }
+Workstation1 NextComponent { Sink2 }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "duplicate_submodel.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        comps = {c["id"]: c for c in snapshot["components"]}
+        self.assertEqual("operation", comps["split"]["type"])
+        self.assertEqual("operation", comps["workstation1"]["type"])
+        self.assertEqual("CUSTOM_SUBMODEL_INSTANCE", comps["workstation1"]["provenance"])
+        self.assertEqual("SUBMODEL_SUMMARY_ONLY", comps["workstation1"]["semantic_scope"])
+        self.assertIn(
+            {"from": "split", "to": "workstation1", "type": "duplicate_flow"},
+            snapshot["connections"],
+        )
+        self.assertIn(
+            {"from": "split", "to": "sink2", "type": "duplicate_flow"},
+            snapshot["connections"],
+        )
+        self.assertEqual(
+            {"Workstation", "Workstation1"},
+            {w["object"] for w in snapshot["parser_warnings"] if w["type"] == "SUBMODEL_SEMANTICS_PARTIAL"},
+        )
+        self.assertFalse(
+            any(w["type"] == "UNSUPPORTED_OR_UNRESOLVED_FLOW_TARGET" for w in snapshot["parser_warnings"])
+        )
+
+    def test_resource_pool_with_unit_does_not_require_artificial_capacity(self):
+        cfg = """RecordEdits
+Define ResourcePool { PoolA }
+Define ResourceUnit { UnitA }
+Define Seize { SeizePool }
+UnitA ResourcePool { PoolA }
+SeizePool ResourceList { PoolA }
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "pool.cfg"
+            path.write_text(cfg, encoding="utf-8")
+            snapshot = converter.convert_cfg_to_snapshot(path)
+
+        resources = {r["id"]: r for r in snapshot["resources"]}
+        self.assertEqual(["seize_pool"], resources["unit_a"]["used_by"])
+        self.assertEqual({"ResourcePool": "PoolA"}, resources["unit_a"]["parameters"])
+        triggered = {a.rule_id for a in snapshot_analyzer.analyze_snapshot(snapshot)}
+        self.assertNotIn("RCL03", triggered)
+        self.assertNotIn("RCL23", triggered)
+
+
+    def test_reference_c1_cfg_declares_seconds_and_distribution_correctly(self):
+        cfg = (
+            snapshot_analyzer.ROOT
+            / "examples"
+            / "jaamsim"
+            / "c1_fila_simples_referencia.cfg"
+        )
+        snapshot = converter.convert_cfg_to_snapshot(cfg)
+        self.assertIn(
+            {"id": "iatdistribution", "name": "IATDistribution",
+             "jaamsim_name": "IATDistribution", "type": "ExponentialDistribution",
+             "parameters": {"UnitType": "TimeUnit", "RandomSeed": "1", "Mean": "1 s"}},
+            snapshot["distributions"],
+        )
+        server = next(
+            item for item in snapshot["components"]
+            if item["id"] == "server_atendimento"
+        )
+        self.assertEqual("0.85 s", server["parameters"]["ServiceTime"])
+        temporal_alerts = [
+            item for item in snapshot_analyzer.analyze_snapshot(snapshot)
+            if item.rule_id == "RCL24"
+        ]
+        self.assertEqual([], temporal_alerts)
 
 
 if __name__ == "__main__":
