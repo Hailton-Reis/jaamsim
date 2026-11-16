@@ -998,8 +998,11 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private void runDataAssist() {
-		long request = latestPrepareRequest.incrementAndGet();
-		preparedDataFile = null;
+		long request;
+		synchronized (latestPrepareRequest) {
+			request = latestPrepareRequest.incrementAndGet();
+			preparedDataFile = null;
+		}
 		appendAssistText(System.lineSeparator() + "Preparação: analisando dados..." + System.lineSeparator());
 
 		Thread worker = new Thread(() -> runDataAssistWorker(request), "JaamSim StatFit Data Assist");
@@ -1096,6 +1099,12 @@ public class StatFitAssistantBox extends FrameBox {
 				sb.append("----------------").append(System.lineSeparator());
 				sb.append(limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS)).append(System.lineSeparator());
 			}
+			synchronized (latestPrepareRequest) {
+			if (request != latestPrepareRequest.get()) {
+				appendAssistText("Preparação concluída, mas substituída por nova solicitação."
+						+ System.lineSeparator());
+				return;
+			}
 			if (verified != null) {
 				preparedDataFile = verified.csv;
 				// Do not replace the AutoFit report with a data preparation report.
@@ -1112,8 +1121,11 @@ public class StatFitAssistantBox extends FrameBox {
 			}
 			appendAssistText(sb.toString());
 			updateState(verified != null ? "Dados preparados" : "Verifique a preparação");
+			}
 		}
 		catch (Exception ex) {
+			if (request != latestPrepareRequest.get())
+				return;
 			appendAssistText("Erro na preparação: " + ex.getClass().getSimpleName()
 					+ ": " + ex.getMessage() + System.lineSeparator());
 			updateState("Erro na preparação");
@@ -1183,14 +1195,29 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private void runStatFit() {
-		long request = latestFitRequest.incrementAndGet();
-		latestMarkdownReportFile = null;
-		latestJsonReportFile = null;
-		latestSnippetFile = null;
-		latestHistogramFile = null;
-		latestEcdfFile = null;
-		latestQqFile = null;
-		latestPpFile = null;
+		long request;
+		synchronized (latestFitRequest) {
+			request = latestFitRequest.incrementAndGet();
+			latestMarkdownReportFile = null;
+			latestJsonReportFile = null;
+			latestSnippetFile = null;
+			latestHistogramFile = null;
+			latestEcdfFile = null;
+			latestQqFile = null;
+			latestPpFile = null;
+		}
+		// Old chart/ranking contents must not be mistaken for this attempt.
+		SwingUtilities.invokeLater(() -> {
+			if (request != latestFitRequest.get())
+				return;
+			distributionTableModel.setRowCount(0);
+			histogramView.setData(new ArrayList<>());
+			histogramView.setCurve(null);
+			ecdfView.setData(new ArrayList<>());
+			qqView.setData(new ArrayList<>());
+			ppView.setData(new ArrayList<>());
+			chartStatusLabel.setText("Novo AutoFit iniciado; aguardando validação dos resultados.");
+		});
 		appendStatusText(System.lineSeparator() + System.lineSeparator()
 				+ "StatFit: iniciando ajuste offline..." + System.lineSeparator());
 
@@ -1290,6 +1317,12 @@ public class StatFitAssistantBox extends FrameBox {
 				summary.append(" segundos. O processo foi interrompido.");
 				summary.append(System.lineSeparator());
 			}
+			synchronized (latestFitRequest) {
+			if (request != latestFitRequest.get()) {
+				appendStatusText("AutoFit anterior terminou, mas há solicitação mais recente."
+						+ System.lineSeparator());
+				return;
+			}
 			appendReadableResultSummary(summary, result.output);
 			if (verified == null) {
 				summary.append("Resultado não confirmado: os arquivos desta execução não serão carregados.")
@@ -1329,8 +1362,11 @@ public class StatFitAssistantBox extends FrameBox {
 			else {
 				updateState("Verifique os avisos");
 			}
+			}
 		}
 		catch (Exception ex) {
+			if (request != latestFitRequest.get())
+				return;
 			appendStatusText("Erro StatFit: " + ex.getClass().getSimpleName()
 					+ ": " + ex.getMessage() + System.lineSeparator());
 			updateState("Erro no ajuste");
@@ -1455,6 +1491,10 @@ public class StatFitAssistantBox extends FrameBox {
 			final List<double[]> ppPoints = pp;
 			final FitCurve selectedCurve = curve;
 			SwingUtilities.invokeLater(() -> {
+				// Render only the report still selected for the current fit.
+				if (latestJsonReportFile == null
+						|| !latestJsonReportFile.equals(jsonFile))
+					return;
 				histogramView.setData(histogramPoints);
 				histogramView.setCurve(selectedCurve);
 				ecdfView.setData(cdfPoints);
@@ -1508,6 +1548,8 @@ public class StatFitAssistantBox extends FrameBox {
 				});
 			}
 			SwingUtilities.invokeLater(() -> {
+				if (latestJsonReportFile == null || !latestJsonReportFile.equals(jsonFile))
+					return;
 				distributionTableModel.setRowCount(0);
 				for (Object[] row : rows)
 					distributionTableModel.addRow(row);
