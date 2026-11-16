@@ -9,6 +9,9 @@ package com.jaamsim.ui;
 
 import java.io.File;
 import java.io.IOException;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.file.StandardCopyOption;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -22,6 +25,7 @@ import java.util.stream.Stream;
 
 import com.jaamsim.JSON.JSONParser;
 import com.jaamsim.JSON.JSONValue;
+import com.jaamsim.JSON.JSONWriter;
 
 final class StatFitRunArtifacts {
 	private StatFitRunArtifacts() {}
@@ -172,6 +176,82 @@ final class StatFitRunArtifacts {
 	}
 
 	/**
+	 * Only a fully validated run receives this local receipt. Every artifact
+	 * hash is recorded so later browsing cannot accidentally select partial
+	 * outputs from a failed run. This is local integrity, not a signature.
+	 */
+	static void recordAcceptedRun(Path run, Prepared accepted) throws IOException {
+		writeReceipt(run, "prepare", accepted.csv, accepted.markdown, accepted.json);
+	}
+
+	static void recordAcceptedRun(Path run, Fit accepted) throws IOException {
+		writeReceipt(run, "fit", accepted.markdown, accepted.json, accepted.histogram,
+				accepted.ecdf, accepted.qq, accepted.pp, accepted.snippet);
+	}
+
+	private static void writeReceipt(Path run, String kind, File... files) throws IOException {
+		Path directory = run.toRealPath();
+		JSONValue receipt = JSONValue.makeObject();
+		receipt.mapVal.put("schema", JSONValue.makeStringVal("jaam.statfit.run_receipt.v1"));
+		receipt.mapVal.put("run_id", JSONValue.makeStringVal(directory.getFileName().toString()));
+		receipt.mapVal.put("kind", JSONValue.makeStringVal(kind));
+		receipt.mapVal.put("outcome", JSONValue.makeStringVal("COMPLETE_LOCAL"));
+		JSONValue artifacts = JSONValue.makeObject();
+		for (File file : files) {
+			Path candidate = file.toPath();
+			if (!Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)
+					|| !candidate.getParent().toRealPath().equals(directory))
+				throw new IOException("Não foi possível registrar arquivo de outra execução");
+			artifacts.mapVal.put(candidate.getFileName().toString(),
+					JSONValue.makeStringVal(sha256File(candidate)));
+		}
+		receipt.mapVal.put("artifact_sha256", artifacts);
+		Path temporary = directory.resolve("STATFIT_RUN_RECEIPT.tmp");
+		Path target = directory.resolve("STATFIT_RUN_RECEIPT.json");
+		Files.write(temporary, (JSONWriter.writeJSONValue(receipt) + "\n")
+				.getBytes(StandardCharsets.UTF_8));
+		Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
+	}
+
+	private static String sha256File(Path file) throws IOException {
+		try {
+			MessageDigest md = MessageDigest.getInstance("SHA-256");
+			try (java.io.InputStream input = Files.newInputStream(file)) {
+				byte[] buf = new byte[16384];
+				int length;
+				while ((length = input.read(buf)) != -1)
+					md.update(buf, 0, length);
+			}
+			StringBuilder digest = new StringBuilder();
+			for (byte b : md.digest())
+				digest.append(String.format(java.util.Locale.ROOT, "%02x", b & 0xff));
+			return digest.toString();
+		}
+		catch (NoSuchAlgorithmException ex) {
+			throw new IOException("SHA-256 unavailable", ex);
+		}
+	}
+
+	private static boolean isAcceptedRunArtifact(Path run, Path candidate) {
+		Path receiptFile = run.resolve("STATFIT_RUN_RECEIPT.json");
+		if (!Files.isRegularFile(receiptFile, LinkOption.NOFOLLOW_LINKS))
+			return false;
+		try {
+			JSONValue receipt = readObject(receiptFile);
+			if (!"jaam.statfit.run_receipt.v1".equals(text(receipt, "schema"))
+					|| !"COMPLETE_LOCAL".equals(text(receipt, "outcome"))
+					|| !run.getFileName().toString().equals(text(receipt, "run_id")))
+				return false;
+			JSONValue artifacts = member(receipt, "artifact_sha256");
+			String recorded = text(artifacts, candidate.getFileName().toString());
+			return !recorded.isEmpty() && recorded.equalsIgnoreCase(sha256File(candidate));
+		}
+		catch (Exception ex) {
+			return false;
+		}
+	}
+
+	/**
 	 * Show the latest successful-looking local artifact in direct legacy
 	 * folders or one level below runs/. Never recurse arbitrarily or follow
 	 * symlinked run directories. This is browsing, not success attestation.
@@ -195,7 +275,8 @@ final class StatFitRunArtifacts {
 							continue;
 						try (Stream<Path> files = Files.list(run)) {
 							for (Path file : (Iterable<Path>) files::iterator)
-								if (matches(file, suffix) && newer(file, newest))
+								if (matches(file, suffix) && newer(file, newest)
+										&& isAcceptedRunArtifact(run, file))
 									newest = file;
 						}
 						catch (IOException ex) {
