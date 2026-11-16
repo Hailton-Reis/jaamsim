@@ -591,3 +591,71 @@ programa em Windows. Não houve instalação nem alteração de CMD ativo,
 atalho, arquivos do Drive, modelo .cfg, ativação de P004, Full45 ou
 mesclagem do PR. Estado: `CANDIDATE_ONLY / GUI_PENDING /
 P004_DENY / FULL45_NO_GO`.
+
+## v0.63 — precedencia obrigatoria do ambiente preparado pelo CMD (15/11/2026)
+
+A entrada do Windows continua **uma unica**
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`. O atalho, a versao ativa,
+as opcoes 1–11 e o controlador MC-001 historico nao foram alterados.
+Esta e uma candidata privada, **nao instalada nem testada manualmente**.
+
+### Falha identificada
+
+Desde a v0.61, `JAAMSIM_ASSISTANT_ROOT` configura de forma obrigatoria
+a raiz dos scripts Java/Python, mas as classes do JaamSim ainda priorizavam
+`-Djaamsim.assistant.root` sobre a variavel de ambiente. De modo
+semelhante, `-Djaamsim.python` podia substituir o
+`JAAMSIM_PYTHON` previamente inspecionado pelo CMD. Isso permitia
+redirecionar a janela Assistente IA ou StatFit para modulo/interprete
+diferente daquele selecionado pelo controlador.
+
+### Correcao na branch
+
+O helper compartilhado
+`src/main/java/com/jaamsim/ui/AssistantLaunchSettings.java`
+(commit `b256150b`) implementa:
+
+1. Se o valor de ambiente herdado do CMD estiver presente,
+   **ele vence a propriedade Java -D**, tanto para raiz quanto Python.
+2. Se o ambiente estiver explicitamente configurado e invalido,
+   nao ocorre fallback silencioso para outra propriedade ou modulo;
+   o uso falha de forma segura.
+3. Se a aplicacao for iniciada **sem a variavel de ambiente**,
+   propriedades Java -D permanecem como alternativa compativel.
+   Na ausencia de ambas, a descoberta legada independente permanece.
+
+As janelas `AIAssistantBox.java` (`d462a8e5`) e
+`StatFitAssistantBox.java` (`3d5fd083`) utilizam a mesma funcao
+para `JAAMSIM_ASSISTANT_ROOT` e `JAAMSIM_PYTHON`. A prioridade
+nao muda o comportamento do menu 1–11 do CMD.
+
+### Auditoria e integridade da candidata
+
+- Java/JDK25 e **43 verificacoes headless**:
+  [CI Java](https://github.com/Hailton-Reis/jaamsim/actions/runs/43780345018)
+  **SUCCESS**. Dez novos cenarios cobrem precedencia e fallback;
+  regressao em `OfflineRclReportContractTest.java` (`9debbd69`).
+- Python **95 testes + 6 subtestes**, aprovados nas quatro
+  combinacoes Windows/Linux × 3.11/3.14:
+  [CI Python](https://github.com/Hailton-Reis/jaamsim/actions/runs/43780345002)
+  **SUCCESS**.
+- Módulo nativo `JAAM_AI_NATIVE/` recompilado: **37/37**
+  arquivos conferidos por hash e tamanho. Manifesto SHA-256
+  `39eb0b82427d57fde4a07be8915c8f4c13f737bd545599525dd86d6bb133bd1c`.
+- CMD v0.63 SHA-256:
+  `ec817b45561d16ace6524643a23cf179d69382ceedf1494d45b36d528728050f`,
+  **2.147.579 bytes**.
+- Artefato:
+  `JAAM_AI_V063_CMD_ORIGINAL_AMBIENTE_FIXADO_IA_STATFIT_2026-11-15.zip`;
+  SHA-256 `ee70efd6b54d4f89e663f50b2e08de63fa64d2759f4e2e289b9ea85112011e8c`;
+  **84 entradas unicas** e **13 backups integrais** v0.50–v0.62.
+- Modificacoes no CMD v0.62→v0.63 limitadas a **numeros de versao,
+  nome do manifesto e hash fixado do modulo**; diff reversivel e
+  payload historico preservado byte a byte.
+- Relatorio local `JAAM_AI_V063_STATIC_REPORT_2026-11-15.json` e patch
+  `JAAM_AI_V063_DIFF_CMD_V062_V063.patch`.
+
+**Limites:** os CI e hashes nao demonstram a abertura real da GUI ou
+o funcionamento do atalho no Windows. Nenhuma substituicao no Drive,
+teste manual, inferencia P004, Full45 ou merge foi executada.
+Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
