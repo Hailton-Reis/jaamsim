@@ -1155,7 +1155,12 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private void usePreparedData() {
-		if (preparedDataFile == null || !preparedDataFile.isFile()) {
+		// A prepared CSV may have been changed after its successful run.
+		// Never choose it merely because a file with the same name exists.
+		if (preparedDataFile == null || !preparedDataFile.isFile()
+				|| !StatFitRunArtifacts.isAcceptedRunArtifact(
+						preparedDataFile.toPath().toAbsolutePath().normalize().getParent(),
+						preparedDataFile.toPath().toAbsolutePath().normalize())) {
 			appendAssistText(System.lineSeparator()
 					+ "Usar CSV preparado: ainda não há CSV preparado válido. Clique em Preparar dados primeiro."
 					+ System.lineSeparator());
@@ -1796,18 +1801,15 @@ public class StatFitAssistantBox extends FrameBox {
 
 			Path outputDir = assistantRoot.resolve("output")
 					.resolve("statfit");
-			File histogram = latestHistogramFile != null && latestHistogramFile.isFile()
-					? latestHistogramFile
-					: findLatestFile(outputDir.toFile(), "_histograma.svg");
-			File ecdf = latestEcdfFile != null && latestEcdfFile.isFile()
-					? latestEcdfFile
-					: findLatestFile(outputDir.toFile(), "_cdf_empirica.svg");
-			File qq = latestQqFile != null && latestQqFile.isFile()
-					? latestQqFile
-					: findLatestFile(outputDir.toFile(), "_qq_plot.svg");
-			File pp = latestPpFile != null && latestPpFile.isFile()
-					? latestPpFile
-					: findLatestFile(outputDir.toFile(), "_pp_plot.svg");
+			boolean attempted = latestFitRequest.get() != 0;
+			File histogram = StatFitRunArtifacts.chooseResultForDisplay(
+					latestHistogramFile, outputDir.toFile(), "_histograma.svg", attempted);
+			File ecdf = StatFitRunArtifacts.chooseResultForDisplay(
+					latestEcdfFile, outputDir.toFile(), "_cdf_empirica.svg", attempted);
+			File qq = StatFitRunArtifacts.chooseResultForDisplay(
+					latestQqFile, outputDir.toFile(), "_qq_plot.svg", attempted);
+			File pp = StatFitRunArtifacts.chooseResultForDisplay(
+					latestPpFile, outputDir.toFile(), "_pp_plot.svg", attempted);
 
 			if (histogram == null && ecdf == null && qq == null && pp == null) {
 				appendStatusText(System.lineSeparator()
@@ -1851,9 +1853,9 @@ public class StatFitAssistantBox extends FrameBox {
 
 			Path outputDir = assistantRoot.resolve("output")
 					.resolve("statfit");
-			File report = latestMarkdownReportFile != null && latestMarkdownReportFile.isFile()
-					? latestMarkdownReportFile
-					: findLatestFile(outputDir.toFile(), "_statfit_report.md");
+			File report = StatFitRunArtifacts.chooseResultForDisplay(
+					latestMarkdownReportFile, outputDir.toFile(), "_statfit_report.md",
+					latestFitRequest.get() != 0);
 
 			if (report == null) {
 				appendStatusText(System.lineSeparator()
@@ -1890,9 +1892,9 @@ public class StatFitAssistantBox extends FrameBox {
 
 			Path outputDir = assistantRoot.resolve("output")
 					.resolve("statfit");
-			File snippet = latestSnippetFile != null && latestSnippetFile.isFile()
-					? latestSnippetFile
-					: findLatestFile(outputDir.toFile(), "_jaamsim_distribution.cfg");
+			File snippet = StatFitRunArtifacts.chooseResultForDisplay(
+					latestSnippetFile, outputDir.toFile(), "_jaamsim_distribution.cfg",
+					latestFitRequest.get() != 0);
 
 			if (snippet == null) {
 				appendStatusText(System.lineSeparator()
