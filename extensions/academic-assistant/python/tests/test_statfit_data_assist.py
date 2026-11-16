@@ -2,6 +2,7 @@ import json
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from argparse import Namespace
 from contextlib import redirect_stdout
 from io import StringIO
@@ -29,6 +30,23 @@ class StatFitDataAssistTest(unittest.TestCase):
         }
         defaults.update(overrides)
         return Namespace(**defaults)
+
+    def test_offline_default_makes_no_provider_calls(self):
+        """Preparing local data must never contact a provider without --online."""
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                assist,
+                "run_online_assist",
+                side_effect=AssertionError("Unexpected external AI request"),
+            ) as online:
+                report, attempts = assist.prepare_data(
+                    self.build_args(Path(tmp), "tempo\\n1\\n2\\n3\\n4\\n5\\n")
+                )
+                online.assert_not_called()
+
+        self.assertFalse(report.online_assist_enabled)
+        self.assertFalse(report.online_assist_used)
+        self.assertEqual([], attempts)
 
     def test_prepares_pasted_excel_column_as_clean_csv(self):
         pasted = """
