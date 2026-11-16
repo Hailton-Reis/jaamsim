@@ -748,3 +748,74 @@ a sintaxe/execução real do CMD em Windows continua **não testada**.
 Nenhuma instalação, teste visual GUI, inferência P004/Full45, alteração
 do atalho ou merge foi executada. Estado:
 `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
+
+
+## v0.65 — preparação de dados StatFit sem chamadas online automáticas (15/11/2026)
+
+**Candidata privada; não instalada.** A entrada continua sendo o único
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, sem novo CMD,
+sem modificação do atalho, com opções 1–11 e legado MC-001 preservados.
+P004 continua DENY e Full45 continua NO-GO.
+
+### Defeito encontrado e corrigido
+
+A interface nativa `StatFitAssistantBox.java` incluía
+`--online --provider-order nvidia,cerebras,groq` **automaticamente**
+no comando do botão de **Preparação de dados**. O script Python
+`statfit_data_assist.py` faz chamadas a provedores configurados quando
+recebe `--online`; portanto, preparar dados poderia solicitar
+orientação LLM externa e consumir tokens sem uma autorização
+explícita para essa etapa.
+
+O código Java foi alterado para que
+`buildDataAssistCommand` utilize uma função estática e isolada
+`buildOfflineDataAssistCommand`, que passa somente:
+interpretador escolhido, script, arquivo de entrada, diretório de
+saída e, quando pertinente, `--column`. **Não fornece**
+`--online`, `--provider-order` ou `--require-online`.
+A preparação nativa é **somente local por padrão**.
+Para usar suporte online futuramente será necessário implementar um
+fluxo separado e uma autorização explícita do usuário na interface.
+O CLI Python independente mantém `--online` para quem o chamar
+intencionalmente fora dessa opção da janela.
+
+### Evidência automática
+
+- Commit Java: `65969c02` (`StatFitAssistantBox.java`).
+- Teste Java headless `567cfb8c`: confirma que o comando
+  sem/com coluna contém apenas os argumentos offline e bloqueia
+  a regressão de qualquer flag de provedor.
+- Python `1c21344b`, com ajuste de dados de teste `6b430425`:
+  intercepta `run_online_assist` para confirmar que o padrão offline
+  não chama o provedor.
+- [CI Java JDK25 + **54 verificações headless**](https://github.com/Hailton-Reis/jaamsim/actions/runs/43784224506):
+  **SUCCESS**.
+- [CI Python **96 testes + 6 subtestes** por combinação, Windows/Linux
+  × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43784224505):
+  **SUCCESS**.
+
+### Identificação do pacote
+
+- Manifesto nativo `JAAM_AI_NATIVE/MANIFEST_SHA256.json`:
+  SHA-256 `86d6f35ee8fc759dc4ec0c22db71058b30b6ed19250e2b763989145d3a037d7f`;
+  **38/38** arquivos, tamanho e SHA-256 conferidos.
+- CMD candidato v0.65: SHA-256
+  `1597a2c64fe5e16241593b686b2d66f2cad7ec0551cb43598deae0400a61e73f`,
+  **2.149.688 bytes**. Em relação à v0.64, o CMD teve somente
+  substituições byte-reversíveis de identificação de versão,
+  nome de manifesto e hash fixado do módulo compilado.
+- ZIP candidato
+  `JAAM_AI_V065_CMD_ORIGINAL_STATFIT_PREPARACAO_OFFLINE_2026-11-15.zip`,
+  SHA-256
+  `de4ad42f9a96ca17bc27c101f4ceff423bb21d29f1f0cbd0206989c61389ba54`,
+  **93 entradas únicas**, 15 backups íntegros (v0.50–v0.64).
+- Arquivos de auditoria:
+  `JAAM_AI_V065_STATIC_REPORT_2026-11-15.json` e
+  `JAAM_AI_V065_DIFF_CMD_V064_V065.patch`.
+
+**Limites:** não foram executados a interface Windows, o CMD,
+qualquer experimento P004/Full45 ou testes manuais. Os testes
+automatizados validam a composição do comando offline e a
+regressão do script Python, mas não substituem o aceite em Windows.
+A versão ativa do CMD/Drive e o atalho permanecem intocados;
+o PR continua em rascunho e sem merge.
