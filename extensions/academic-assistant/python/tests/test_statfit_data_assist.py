@@ -54,6 +54,8 @@ Cronometragem do Tempo de Atendimento Consultorio (s)
         self.assertEqual(report.selected_column, payload["selected_column"])
         self.assertIn("data_quality_level", payload)
         self.assertEqual(0, payload["outlier_count"])
+        self.assertEqual("jaam.ai.python_runtime.v1", payload["python_runtime"]["schema"])
+        self.assertEqual(64, len(payload["python_runtime"]["entry_script_sha256"]))
 
     def test_selects_requested_column_and_ignores_index_column(self):
         pasted = """
