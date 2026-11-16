@@ -106,6 +106,16 @@ public final class OfflineRclReportContractTest {
 		}
 	}
 
+	private static void expectLauncherPrecedence(
+			String environmentValue, String propertyValue, String expected, String context) {
+		String selected = AssistantLaunchSettings.preferLauncherEnvironment(
+				environmentValue, propertyValue);
+		if (expected == null ? selected != null : !expected.equals(selected))
+			throw new AssertionError("Launcher precedence " + context
+					+ ": expected=" + expected + ", found=" + selected);
+		checks++;
+	}
+
 	public static void main(String[] args) throws Exception {
 		Path temp = Files.createTempDirectory("jaam-rcl-contract-");
 		Path repositoryRoot = temp.resolve("JAAM_AI_NATIVE");
@@ -274,6 +284,32 @@ public final class OfflineRclReportContractTest {
 		expectRoot(StatFitAssistantBox.class, cfg.toFile(), wrongScript, null,
 				"explicit root missing StatFit script");
 
+		// These are the environment/property pairs visible to *both*
+		// AIAssistantBox and StatFitAssistantBox via the shared helper.
+		// The CMD environment is authoritative even when a Java -D value
+		// exists or points to a different unverified extension/interpreter.
+		expectLauncherPrecedence("  C:\\verified\\assistant  ",
+				"C:\\unverified\\assistant", "C:\\verified\\assistant",
+				"pinned extension root supersedes -D");
+		expectLauncherPrecedence("  C:\\missing\\assistant  ",
+				assistantRoot.toString(), "C:\\missing\\assistant",
+				"invalid explicit environment does not fall back to -D");
+		expectLauncherPrecedence(" C:\\verified\\python.exe ",
+				"C:\\wrong\\python.exe", "C:\\verified\\python.exe",
+				"pinned Python supersedes -D");
+		expectLauncherPrecedence(" C:\\missing\\python.exe ",
+				"python", "C:\\missing\\python.exe",
+				"invalid explicit Python cannot silently revert to -D");
+		expectLauncherPrecedence(null, "  /independent/assistant  ",
+				"/independent/assistant", "standalone Java property fallback");
+		expectLauncherPrecedence("", "  /standalone/python  ",
+				"/standalone/python", "empty environment uses -D Python");
+		expectLauncherPrecedence("   ", " /standalone/root ",
+				"/standalone/root", "whitespace environment uses -D root");
+		expectLauncherPrecedence(null, null, null, "no root explicitly configured");
+		expectLauncherPrecedence(null, "  ", null, "blank Java property");
+		expectLauncherPrecedence(" python.exe ", null, "python.exe",
+				"environment command name remains intact");
 		System.out.println("RCL_REPORT_PROVENANCE_CONTRACT_OK " + checks);
 	}
 }
