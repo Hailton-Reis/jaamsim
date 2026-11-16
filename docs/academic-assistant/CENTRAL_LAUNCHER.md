@@ -819,3 +819,80 @@ automatizados validam a composição do comando offline e a
 regressão do script Python, mas não substituem o aceite em Windows.
 A versão ativa do CMD/Drive e o atalho permanecem intocados;
 o PR continua em rascunho e sem merge.
+
+
+## v0.66 — sessões StatFit isoladas e recibos de resultados (16/11/2026)
+
+**Candidata privada de engenharia, não instalada.** A entrada Windows
+continua o mesmo `00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, com
+menu 1–11 e as opções antigas 1–7 do MC-001 intactas. O atalho,
+o CMD ativo, o Google Drive e modelos .cfg não foram modificados.
+P004 permanece DENY e Full45 NO-GO.
+
+### Problema concreto corrigido
+
+A interface `StatFitAssistantBox.java` usava as pastas compartilhadas
+`output/statfit/` e `output/statfit/data_assist/` para sucessivos
+AutoFit e preparações. Arquivos de execuções diferentes podiam sobrescrever
+uns aos outros. A GUI ainda interpretava mensagens de stdout para atualizar
+referências a CSV, JSON e gráficos mesmo quando o processo retornava erro
+ou limite de tempo. Isso podia apresentar um arquivo antigo como se fosse
+o resultado da análise recém-iniciada.
+
+### Mudanças
+
+- A classe nativa `StatFitRunArtifacts.java` cria subpastas exclusivas:
+  `output/statfit/runs/fit_<UTC>_<ID>` e
+  `output/statfit/runs/prepare_<UTC>_<ID>`.
+- A GUI só adota resultados após processo concluído com código zero,
+  CSV/JSON/Markdown/gráficos/snippet presentes na **mesma pasta**,
+  JSON com o contrato esperado, dados de runtime Python e coerência
+  entre os caminhos do relatório e da saída do processo.
+- Recebe `STATFIT_RUN_RECEIPT.json` somente depois da validação local,
+  com status `COMPLETE_LOCAL` e SHA-256 de cada arquivo, não uma
+  assinatura digital. Falhas e arquivos parciais continuam armazenados
+  para auditoria, mas não são promovidos a resultado atual.
+- A consulta de históricos preserva a compatibilidade com relatórios
+  antigos diretamente em `output/statfit/` e percorre as novas
+  subpastas apenas quando existe recibo de execução aceita e o
+  SHA-256 do arquivo consultado coincide com o valor registrado.
+- Um contador de geração por operação impede que uma execução anterior
+  finalizada tardiamente substitua as referências da última solicitação.
+- Um relatório Markdown da etapa **Preparação de dados** não substitui
+  o relatório de **AutoFit**.
+- A preparação nativa continua **offline por padrão**, sem
+  `--online` nem provedores automáticos, conforme v0.65.
+
+### Evidências de testes e limites
+
+- [CI Java JDK25 + **54 verificações RCL e 23 contratos StatFit**](https://github.com/Hailton-Reis/jaamsim/actions/runs/43883631399):
+  **SUCCESS**, sem inicializar a interface.
+- [CI Python **96 testes + 6 subtestes por job**, matriz
+  Windows/Linux × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43883631588):
+  **SUCCESS**.
+- Módulo compilado `JAAM_AI_NATIVE`: **38/38 arquivos** verificados,
+  manifesto SHA-256
+  `f30b0245f7300fcd3d66798a47386eec35c9e987dc88d1c8129ac2ea3fe41512`.
+- CMD privado v0.66: **2.149.688 bytes**, SHA-256
+  `340764bfe6abcb79a0543fffcca34a18bb76cd14a80e86e91422227c0cd5a216`.
+  Comparado com v0.65, foram trocados apenas os marcadores de versão,
+  o nome do manifesto e o SHA-256 fixado; o restante do CMD foi
+  comprovado byte a byte idêntico após reversão dessas alterações.
+- ZIP `JAAM_AI_V066_CMD_ORIGINAL_STATFIT_SESSOES_ISOLADAS_2026-11-16.zip`:
+  **97 entradas únicas**, SHA-256
+  `f3338249f98e3bf7fb6db16e02db0ecf40448bf5e8eb9d0a321fb4b9edb85b8d`;
+  **16 backups históricos íntegros** v0.50–v0.65.
+- Arquivos auxiliares:
+  `JAAM_AI_V066_STATIC_REPORT_2026-11-16.json` e
+  `JAAM_AI_V066_DIFF_CMD_V065_V066.patch`.
+- A cabeça da branch de desenvolvimento no CI foi
+  `f586e4f07510a5aabb4947d480c9f04909f1079c`; o
+  `source_commit` presente no artefato CI corresponde ao merge
+  temporário do PR.
+
+**Limites:** o CI e a análise estática não substituem teste manual
+no Windows. Nenhuma instalação, abertura de GUI, execução do CMD,
+simulação científica, inferência P004/Full45 ou mesclagem do PR
+foi realizada. Recibos locais com hashes não são assinaturas,
+nem garantem integridade contra um adversário com acesso de escrita.
+Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
