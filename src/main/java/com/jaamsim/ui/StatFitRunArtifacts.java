@@ -232,7 +232,21 @@ final class StatFitRunArtifacts {
 		}
 	}
 
-	private static boolean isAcceptedRunArtifact(Path run, Path candidate) {
+	static boolean isAcceptedRunArtifact(Path run, Path candidate) {
+		// The receipt must describe THIS file inside THIS run. A matching
+		// basename/hash from another folder cannot authorize adoption.
+		if (candidate == null || run == null
+				|| !Files.isDirectory(run, LinkOption.NOFOLLOW_LINKS)
+				|| !Files.isRegularFile(candidate, LinkOption.NOFOLLOW_LINKS)
+				|| candidate.getParent() == null)
+			return false;
+		try {
+			if (!run.toRealPath().equals(candidate.getParent().toRealPath()))
+				return false;
+		}
+		catch (IOException ex) {
+			return false;
+		}
 		Path receiptFile = run.resolve("STATFIT_RUN_RECEIPT.json");
 		if (!Files.isRegularFile(receiptFile, LinkOption.NOFOLLOW_LINKS))
 			return false;
@@ -249,6 +263,29 @@ final class StatFitRunArtifacts {
 		catch (Exception ex) {
 			return false;
 		}
+	}
+
+	/**
+	 * A failed/currently pending native request must NEVER silently fall
+	 * back to an older report. Historical browsing remains available when
+	 * no AutoFit has been requested in this window session.
+	 *
+	 * Files accepted by an earlier run are rehashed before they are opened,
+	 * because the operator or another process may change them afterwards.
+	 */
+	static File chooseResultForDisplay(File selected, File historyRoot,
+			String suffix, boolean requestAttempted) {
+		if (!requestAttempted)
+			return findLatestFile(historyRoot, suffix);
+		if (selected == null || !selected.getName().endsWith(suffix)
+				|| !Files.isRegularFile(selected.toPath(), LinkOption.NOFOLLOW_LINKS))
+			return null;
+		Path file = selected.toPath().toAbsolutePath().normalize();
+		Path run = file.getParent();
+		Path history = historyRoot.toPath().toAbsolutePath().normalize().resolve("runs");
+		if (run == null || run.getParent() == null || !run.getParent().equals(history))
+			return null;
+		return isAcceptedRunArtifact(run, file) ? selected : null;
 	}
 
 	/**
