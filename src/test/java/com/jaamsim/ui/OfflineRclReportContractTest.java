@@ -14,6 +14,7 @@ import java.util.HexFormat;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 public final class OfflineRclReportContractTest {
 
@@ -129,6 +130,42 @@ public final class OfflineRclReportContractTest {
 			throw new AssertionError("Launcher precedence " + context
 					+ ": expected=" + expected + ", found=" + selected);
 		checks++;
+	}
+
+	@SuppressWarnings("unchecked")
+	private static void expectStatFitDataAssistOffline(Path script, Path outputDir,
+			File source, String column) throws Exception {
+		Method build = StatFitAssistantBox.class.getDeclaredMethod(
+				"buildOfflineDataAssistCommand", String.class, File.class,
+				Path.class, Path.class, String.class);
+		build.setAccessible(true);
+		List<String> command = (List<String>) build.invoke(null, "verified-python",
+				source, script, outputDir, column);
+
+		if (command.size() != (column.trim().isEmpty() ? 5 : 7))
+			throw new AssertionError("StatFit data preparation generated unexpected flags: " + command);
+		if (!"verified-python".equals(command.get(0))
+				|| !script.toString().equals(command.get(1))
+				|| !source.getAbsolutePath().equals(command.get(2))
+				|| !"--output-dir".equals(command.get(3))
+				|| !outputDir.toString().equals(command.get(4)))
+			throw new AssertionError("StatFit offline command source/target changed");
+		checks++;
+
+		for (String forbidden : new String[] {
+				"--online", "--require-online", "--provider-order",
+				"nvidia,cerebras,groq"}) {
+			if (command.contains(forbidden))
+				throw new AssertionError("StatFit preparation must never auto-invoke LLM: " + forbidden);
+		}
+		checks++;
+
+		if (!column.trim().isEmpty()) {
+			if (!"--column".equals(command.get(5))
+					|| !column.trim().equals(command.get(6)))
+				throw new AssertionError("StatFit --column was not preserved");
+			checks++;
+		}
 	}
 
 	public static void main(String[] args) throws Exception {
@@ -360,6 +397,14 @@ public final class OfflineRclReportContractTest {
 				escape(python.resolve("another_script.py").toString()));
 		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), wrongScriptRuntime));
 		expectBlocked(verifier, report, cfg, assistantRoot);
+
+		// The data-preparation button must stay offline unless a future
+		// explicit user-consent UI is introduced. A CLI provider flag here
+		// would result in unrequested network calls or token consumption.
+		expectStatFitDataAssistOffline(python.resolve("statfit_data_assist.py"),
+				temp.resolve("prepared_outputs"), cfg.toFile(), "");
+		expectStatFitDataAssistOffline(python.resolve("statfit_data_assist.py"),
+				temp.resolve("prepared_outputs"), cfg.toFile(), " tempo ");
 
 		System.out.println("RCL_REPORT_PROVENANCE_CONTRACT_OK " + checks);
 	}
