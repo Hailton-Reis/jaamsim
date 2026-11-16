@@ -271,6 +271,36 @@ public final class StatFitRunArtifactsContractTest {
 		expect(StatFitRunArtifacts.chooseFitForDisplay(
 				looseLegacy.toFile(), null, false) == null,
 				"legacy archives remain manual-only, not silently treated as validated");
+		// Symlinks at the run transaction boundary must not redirect writes
+		// to an arbitrary folder outside the configured StatFit workspace.
+		Path symlinkRoot = Files.createTempDirectory("jaam-statfit-symlink-root-");
+		Path outsideHistory = Files.createTempDirectory("jaam-statfit-outside-history-");
+		Files.createSymbolicLink(symlinkRoot.resolve("runs"), outsideHistory);
+		expectBlocked("a symlinked runs directory cannot redirect artifact creation",
+				() -> StatFitRunArtifacts.createRunDirectory(symlinkRoot, "fit"));
+		boolean outsideHistoryTouched;
+		try (java.util.stream.Stream<Path> children = Files.list(outsideHistory)) {
+			outsideHistoryTouched = children.findAny().isPresent();
+		}
+		expect(!outsideHistoryTouched, "rejected runs symlink leaves the external directory untouched");
+
+		Path symlinkRunRoot = Files.createTempDirectory("jaam-statfit-symlink-run-");
+		Path symlinkRun = StatFitRunArtifacts.createRunDirectory(symlinkRunRoot, "fit");
+		Map<String, Path> symlinkRunFiles = putFit(symlinkRun);
+		StatFitRunArtifacts.Fit symlinkRunFit =
+				StatFitRunArtifacts.validateFit(symlinkRun, fitOutput(symlinkRunFiles));
+		Path movedParent = Files.createTempDirectory("jaam-statfit-moved-run-");
+		Path movedRun = movedParent.resolve("fit_moved_outside");
+		Files.move(symlinkRun, movedRun);
+		Files.createSymbolicLink(symlinkRun, movedRun);
+		expectBlocked("validation rejects a run directory replaced by a symlink",
+				() -> StatFitRunArtifacts.validateFit(symlinkRun, fitOutput(symlinkRunFiles)));
+		expectBlocked("receipt cannot be written through a symlinked run directory",
+				() -> StatFitRunArtifacts.recordAcceptedRun(symlinkRun, symlinkRunFit));
+		expect(!Files.exists(movedRun.resolve("STATFIT_RUN_RECEIPT.json")),
+				"rejected symlink run cannot receive an acceptance receipt");
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(symlinkRunRoot.toFile()) == null,
+				"historical browsing ignores symlinked run directories");
 		System.out.println("STATFIT_RUN_ARTIFACT_CONTRACT_OK " + checks);
 	}
 }
