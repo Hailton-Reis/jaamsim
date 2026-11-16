@@ -1843,6 +1843,17 @@ public class AIAssistantBox extends FrameBox {
 			boolean unchanged = beforeSha.equals(afterSha);
 			Path reportFile = outputDir.resolve(modelId + "_offline_review.json");
 			String reportError = validateOfflineRclReport(reportFile, cfgFile.toPath(), modelId, assistantRoot);
+			JSONValue pythonRuntime = null;
+			if (reportError == null) {
+				try {
+					pythonRuntime = getMapChild(readJsonFile(reportFile), "python_runtime");
+					if (pythonRuntime == null)
+						reportError = "relatório não identifica o interpretador Python utilizado";
+				}
+				catch (Exception ex) {
+					reportError = "metadados de execução Python indisponíveis";
+				}
+			}
 			boolean validReport = reportError == null;
 			String reportSha = null;
 			if (validReport) {
@@ -1860,7 +1871,7 @@ public class AIAssistantBox extends FrameBox {
 			// The receipt is written even when Python fails or reaches the time limit.
 			// A missing receipt is an error, never a successful review.
 			writeRclReceipt(outputDir, cfgFile.toPath(), modelId, beforeSha, afterSha, reportSha,
-					result, errorText, complete);
+					pythonRuntime, result, errorText, complete);
 
 			StringBuilder sb = new StringBuilder();
 			sb.append("Assistente: revisão ").append(complete ? "OFFLINE_CONCLUIDA" : "FALHOU_OU_BLOQUEADA")
@@ -2359,6 +2370,19 @@ public class AIAssistantBox extends FrameBox {
 			Path statusSource = resolveReportedSource(getStringChild(statuses, "input_file", ""), assistantRoot);
 			if (statusSource == null || !recorded.equals(statusSource))
 				return "origem do arquivo de status não corresponde ao relatório";
+
+			// New reports declare the actual interpreter that generated them.
+			// Legacy historical reports may omit it, but newly-run GUI reviews
+			// require it before declaring success in runLocalRclWorker().
+			JSONValue runtime = getMapChild(report, "python_runtime");
+			if (runtime != null) {
+				String runtimeError = checkReportedPythonRuntime(runtime, assistantRoot);
+				if (runtimeError != null)
+					return runtimeError;
+				JSONValue statusRuntime = getMapChild(statuses, "python_runtime");
+				if (statusRuntime == null || !sameRuntimeEvidence(runtime, statusRuntime))
+					return "metadados Python divergentes entre relatório e sugestões";
+			}
 			if (getMapChild(statuses, "suggestions") == null
 					|| !getMapChild(statuses, "suggestions").isList())
 				return "arquivo de status sem lista de sugestões";
@@ -2367,6 +2391,78 @@ public class AIAssistantBox extends FrameBox {
 		catch (Exception ex) {
 			return "arquivo JSON não pôde ser validado: " + ex.getClass().getSimpleName();
 		}
+	}
+
+	/**
+	 * Locally cross-check self-reported Python evidence against current files.
+	 * This detects accidental interpreter/script drift, NOT a cryptographic
+	 * attestation of process integrity. Do not upload paths to public CI.
+	 */
+	private static String checkReportedPythonRuntime(JSONValue runtime, Path assistantRoot) {
+		if (runtime == null || !runtime.isMap()
+				|| !"jaam.ai.python_runtime.v1".equals(getStringChild(runtime, "schema", ""))
+				|| !"self_reported_no_external_attestation".equals(
+						getStringChild(runtime, "evidence_level", "")))
+			return "proveniência do Python ausente ou com esquema inesperado";
+		String version = getStringChild(runtime, "python_version", "");
+		String[] numbers = version.split("\\.");
+		try {
+			if (numbers.length < 3 || Integer.parseInt(numbers[0]) != 3
+					|| Integer.parseInt(numbers[1]) < 11
+					|| Integer.parseInt(numbers[2]) < 0)
+				return "versão Python do relatório não atende 3.11+";
+		}
+		catch (NumberFormatException ex) {
+			return "versão Python inválida no relatório";
+		}
+		String scriptPath = getStringChild(runtime, "entry_script", "");
+		String exePath = getStringChild(runtime, "python_executable", "");
+		if (scriptPath.isEmpty() || exePath.isEmpty())
+			return "caminhos do interpretador ou script não declarados";
+		try {
+			Path expectedScript = assistantRoot.resolve("python")
+					.resolve("modulo_ia_offline.py").toRealPath();
+			Path reportedScript = Paths.get(scriptPath);
+			Path reportedPython = Paths.get(exePath);
+			if (!reportedScript.isAbsolute() || !reportedPython.isAbsolute())
+				return "interpretador ou script Python sem caminho absoluto";
+			if (!expectedScript.equals(reportedScript.toRealPath()))
+				return "script Python do relatório não corresponde ao módulo configurado";
+			if (!Files.isRegularFile(reportedPython, LinkOption.NOFOLLOW_LINKS))
+				return "executável Python do relatório não encontrado";
+			if (!sha256File(expectedScript).equalsIgnoreCase(
+					getStringChild(runtime, "entry_script_sha256", "")))
+				return "SHA-256 do script Python não corresponde";
+			if (!sha256File(reportedPython).equalsIgnoreCase(
+					getStringChild(runtime, "python_executable_sha256", "")))
+				return "SHA-256 do executável Python não corresponde";
+			// The CMD selects an absolute interpreter. If the GUI inherited it,
+			// reject a different reported executable instead of just recording.
+			String pinnedPython = System.getenv("JAAMSIM_PYTHON");
+			if (pinnedPython != null && !pinnedPython.trim().isEmpty()) {
+				Path configured = Paths.get(pinnedPython.trim());
+				if (configured.isAbsolute() && Files.isRegularFile(configured)
+						&& !configured.toRealPath().equals(reportedPython.toRealPath()))
+					return "interpretador declarado não é o configurado pelo CMD";
+			}
+			return null;
+		}
+		catch (Exception ex) {
+			return "proveniência Python não verificável: " + ex.getClass().getSimpleName();
+		}
+	}
+
+	private static boolean sameRuntimeEvidence(JSONValue a, JSONValue b) {
+		if (a == null || b == null || !a.isMap() || !b.isMap())
+			return false;
+		for (String key : new String[] {
+				"schema", "python_executable", "python_executable_sha256",
+				"python_version", "entry_script", "entry_script_sha256"}) {
+			String value = getStringChild(a, key, "");
+			if (value.isEmpty() || !value.equals(getStringChild(b, key, "")))
+				return false;
+		}
+		return true;
 	}
 
 	private static boolean isFalseFlag(JSONValue parent, String key) {
@@ -2408,7 +2504,7 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static void writeRclReceipt(Path outputDir, Path cfgFile, String modelId,
-			String beforeSha, String afterSha, String reportSha,
+			String beforeSha, String afterSha, String reportSha, JSONValue pythonRuntime,
 			RclRunResult result, String error, boolean complete)
 			throws IOException {
 		JSONValue receipt = JSONValue.makeObject();
@@ -2424,6 +2520,9 @@ public class AIAssistantBox extends FrameBox {
 				? JSONValue.makeTrueVal() : JSONValue.makeFalseVal());
 		receipt.mapVal.put("report_sha256", reportSha == null
 				? JSONValue.makeNullVal() : JSONValue.makeStringVal(reportSha));
+		// Recorded by the Python process; self-reported, NOT a signed attestation.
+		receipt.mapVal.put("python_runtime", pythonRuntime == null
+				? JSONValue.makeNullVal() : pythonRuntime);
 		receipt.mapVal.put("exit_code", JSONValue.makeNumVal(result == null ? -1 : result.exitCode));
 		receipt.mapVal.put("outcome", JSONValue.makeStringVal(complete ? "COMPLETE_OFFLINE" : "FAILED_OR_BLOCKED"));
 		receipt.mapVal.put("finished", result != null && result.finished
