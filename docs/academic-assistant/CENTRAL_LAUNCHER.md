@@ -969,3 +969,77 @@ digitais. Nenhuma instalação, ativação do CMD, execução de modelo
 científico, inferência P004/Full45, alteração no Drive, mudança de
 atalho ou merge do PR foi realizada.
 Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
+
+
+## v0.68 — histórico StatFit como conjunto íntegro de uma única execução (16/11/2026)
+
+**Candidata privada; não instalada.** Continua existindo apenas o
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, no mesmo destino
+previsto para o atalho. Nenhuma função histórica 1–7 ou menu 8–11
+foi substituída. P004 DENY, Full45 NO-GO e `test_locked=false`.
+
+### Defeito corrigido
+
+Na v0.67, `StatFitAssistantBox.openLatestStatFitCharts()`, antes de
+qualquer AutoFit feito na sessão atual, procurava separadamente o
+histograma, ECDF, Q-Q e P-P mais recentes. Mesmo exigindo SHA-256
+individual em execuções novas, essas quatro buscas independentes
+poderiam selecionar **gráficos de análises diferentes**. Abrir relatório
+ou copiar snippet usava outra consulta independente, agravando o risco
+de interpretar resultados misturados como um único ajuste.
+
+### Implementação
+
+- `StatFitRunArtifacts.findLatestAcceptedFit` busca somente diretórios
+  `runs/fit_...` com `STATFIT_RUN_RECEIPT.json` de tipo `fit`
+  e `COMPLETE_LOCAL`, com `run_id` correspondente.
+- A seleção **exige os sete arquivos juntos** (Markdown, JSON,
+  quatro gráficos SVG e snippet `.cfg`), todos na mesma pasta
+  e com SHA-256 individual igual ao registrado no recibo.
+  Um único arquivo alterado, ausente, ambíguo ou em pasta diferente
+  invalida o conjunto inteiro; não há montagem a partir de
+  fragmentos de outras revisões.
+- `chooseFitForDisplay` distingue o último conjunto histórico
+  íntegro, quando a janela ainda não iniciou novo AutoFit, do
+  conjunto atual já aceito. Se um novo AutoFit foi iniciado e
+  falhou ou está pendente, **não ocorre fallback para histórico**.
+- `StatFitAssistantBox` passa a consultar **um único objeto `Fit`**
+  para os botões abrir gráficos, abrir relatório e copiar snippet,
+  em vez de efetuar buscas independentes por sufixo. Mantém as
+  proteções de geração e verificação local implementadas nas
+  versões v0.66/v0.67.
+- Arquivos legados soltos permanecem fisicamente disponíveis
+  para consulta manual por `Abrir pasta de resultados`, mas não
+  são promovidos automaticamente a um conjunto validado.
+- Os recibos com hashes são **evidência de integridade local, não
+  assinaturas nem atestações independentes**.
+
+### Evidências
+
+- Commits: `ec869d52` (conjunto de sete arquivos);
+  `e1ad59b0` (botões usam um único conjunto); `8700728f`
+  e `c89b91b1` (novas regressões e correção do teste de recibo).
+- [Java JDK25: build e **54 contratos RCL + 48 StatFit** aprovados](https://github.com/Hailton-Reis/jaamsim/actions/runs/43900205946).
+- [Python: **96 testes + 6 subtestes por job**, Windows/Linux
+  × Python 3.11/3.14, aprovados](https://github.com/Hailton-Reis/jaamsim/actions/runs/43900205886).
+- Módulo nativo de 38 arquivos, **38/38 hashes e tamanhos conferidos**.
+  SHA-256 de `JAAM_AI_NATIVE/MANIFEST_SHA256.json`:
+  `54bab23d77a114de86244ec427ceceedc0dd565f65c8cbd1607ca5b28a0a16b1`.
+- CMD central v0.68: **2.149.688 bytes**, SHA-256:
+  `09177f8dd978e8c344998e0a0da78a67a8632eec4448be9b96bb915a09e42734`.
+  Alteraram-se **somente metadados de versão, nome do manifesto
+  e hash fixado do novo módulo** em relação à v0.67; a reversão
+  das substituições reproduz exatamente todos os bytes anteriores.
+- ZIP privado `JAAM_AI_V068_CMD_ORIGINAL_STATFIT_HISTORICO_ATOMICO_2026-11-16.zip`,
+  SHA-256 `bbb880fb8c052aaf78d5950f8cdcd86a0af10af727ca9697583f3ccb00708821`,
+  **105 entradas únicas** e **18 backups íntegros**, v0.50–v0.67.
+- Auditoria `JAAM_AI_V068_STATIC_REPORT_2026-11-16.json`
+  e patch `JAAM_AI_V068_DIFF_CMD_V067_V068.patch`.
+- A cabeça da branch efetivamente testada foi
+  `c89b91b1a1e502c60951a85ea94a5855ddd09f09`.
+  O `source_commit` do artefato CI é o merge temporário do PR.
+
+**Limites:** não foram executados testes manuais de interface Windows,
+CMD central, PowerShell, experimento científico, P004/Full45, instalação
+ou alteração do atalho/Drive. O PR continua draft e sem merge.
+Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
