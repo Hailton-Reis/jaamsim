@@ -256,7 +256,7 @@ public final class StatFitRunArtifactsContractTest {
 				"later partial run cannot replace the most recent accepted bundle");
 		String receiptText = Files.readString(newestRun.resolve("STATFIT_RUN_RECEIPT.json"));
 		Files.writeString(newestRun.resolve("STATFIT_RUN_RECEIPT.json"),
-				receiptText.replace("\"kind\":\"fit\"", "\"kind\":\"prepare\""));
+				receiptText.replace("\"fit\"", "\"prepare\""));
 		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile()) == null,
 				"a preparation receipt cannot impersonate an accepted fit");
 		Files.writeString(newestRun.resolve("STATFIT_RUN_RECEIPT.json"), receiptText);
