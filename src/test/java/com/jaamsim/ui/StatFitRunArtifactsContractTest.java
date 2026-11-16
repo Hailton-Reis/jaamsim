@@ -109,14 +109,22 @@ public final class StatFitRunArtifactsContractTest {
 		StatFitRunArtifacts.Prepared verified = StatFitRunArtifacts.validatePreparation(
 				firstPrepare, prepareOutput(prepare));
 		expect(verified.csv.toPath().equals(prepare.get("csv")), "valid preparation bound to first run");
+		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_data_assist.json") == null,
+				"unaccepted preparation not listed");
+		StatFitRunArtifacts.recordAcceptedRun(firstPrepare, verified);
+		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_data_assist.json") != null,
+				"accepted preparation appears in history");
 		expectBlocked("cannot reuse another run's data file",
 				() -> StatFitRunArtifacts.validatePreparation(secondPrepare, prepareOutput(prepare)));
 		expectBlocked("require real prepared JSON",
 				() -> StatFitRunArtifacts.validatePreparation(firstPrepare,
 						prepareOutput(prepare).replace("_data_assist.json", "_data_assist_invalid.json")));
 		Map<String, Path> anotherPrepare = putPrepared(secondPrepare);
-		expect(StatFitRunArtifacts.validatePreparation(secondPrepare, prepareOutput(anotherPrepare))
-				.csv.toPath().equals(anotherPrepare.get("csv")), "same-named CSV in another run is independent");
+		StatFitRunArtifacts.Prepared otherVerified =
+				StatFitRunArtifacts.validatePreparation(secondPrepare, prepareOutput(anotherPrepare));
+		expect(otherVerified.csv.toPath().equals(anotherPrepare.get("csv")),
+				"same-named CSV in another run is independent");
+		StatFitRunArtifacts.recordAcceptedRun(secondPrepare, otherVerified);
 
 		String originalPreparation = Files.readString(prepare.get("json"));
 		Files.writeString(prepare.get("json"), originalPreparation.replace(
@@ -134,12 +142,19 @@ public final class StatFitRunArtifactsContractTest {
 		StatFitRunArtifacts.Fit validFit = StatFitRunArtifacts.validateFit(fit, fitOutput(fitted));
 		expect(validFit.json.toPath().equals(fitted.get("json")), "fit JSON belongs to fit session");
 		expect(validFit.histogram.toPath().equals(fitted.get("histogram")), "fit histogram belongs to same session");
+		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json") == null,
+				"unaccepted or partial fit cannot be browsed as success");
+		StatFitRunArtifacts.recordAcceptedRun(fit, validFit);
+		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json")
+				.equals(fitted.get("json").toFile()), "accepted fit history is visible");
 
 		String originalFit = Files.readString(fitted.get("json"));
 		Files.writeString(fitted.get("json"), originalFit.replace(
 				escape(fitted.get("histogram")), escape(firstPrepare.resolve("tempo_histograma.svg"))));
 		expectBlocked("chart JSON cannot point to an old run",
 				() -> StatFitRunArtifacts.validateFit(fit, fitOutput(fitted)));
+		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json") == null,
+				"altered report is hidden from accepted history");
 		Files.writeString(fitted.get("json"), originalFit);
 
 		expectBlocked("fit stdout cannot import old report",
@@ -148,6 +163,8 @@ public final class StatFitRunArtifactsContractTest {
 		Files.delete(fitted.get("snippet"));
 		expectBlocked("missing snippet must not be treated as complete",
 				() -> StatFitRunArtifacts.validateFit(fit, fitOutput(fitted)));
+		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_jaamsim_distribution.cfg") == null,
+				"deleted snippet no longer appears in history");
 
 		expect(StatFitRunArtifacts.findLatestFile(root.toFile(), "_statfit_report.json")
 				.equals(fitted.get("json").toFile()), "latest run report remains visible in history");
