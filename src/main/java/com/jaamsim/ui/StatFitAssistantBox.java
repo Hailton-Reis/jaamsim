@@ -118,6 +118,7 @@ public class StatFitAssistantBox extends FrameBox {
 	private File latestMarkdownReportFile;
 	private File latestJsonReportFile;
 	private File latestSnippetFile;
+	private volatile StatFitRunArtifacts.Fit latestAcceptedFit;
 	private File latestHistogramFile;
 	private File latestEcdfFile;
 	private File latestQqFile;
@@ -1198,6 +1199,7 @@ public class StatFitAssistantBox extends FrameBox {
 		long request;
 		synchronized (latestFitRequest) {
 			request = latestFitRequest.incrementAndGet();
+			latestAcceptedFit = null;
 			latestMarkdownReportFile = null;
 			latestJsonReportFile = null;
 			latestSnippetFile = null;
@@ -1331,6 +1333,7 @@ public class StatFitAssistantBox extends FrameBox {
 					summary.append("Motivo: ").append(validationError).append(System.lineSeparator());
 			}
 			else {
+				latestAcceptedFit = verified;
 				latestMarkdownReportFile = verified.markdown;
 				latestJsonReportFile = verified.json;
 				latestHistogramFile = verified.histogram;
@@ -1843,17 +1846,12 @@ public class StatFitAssistantBox extends FrameBox {
 
 			Path outputDir = assistantRoot.resolve("output")
 					.resolve("statfit");
-			boolean attempted = latestFitRequest.get() != 0;
-			File histogram = StatFitRunArtifacts.chooseResultForDisplay(
-					latestHistogramFile, outputDir.toFile(), "_histograma.svg", attempted);
-			File ecdf = StatFitRunArtifacts.chooseResultForDisplay(
-					latestEcdfFile, outputDir.toFile(), "_cdf_empirica.svg", attempted);
-			File qq = StatFitRunArtifacts.chooseResultForDisplay(
-					latestQqFile, outputDir.toFile(), "_qq_plot.svg", attempted);
-			File pp = StatFitRunArtifacts.chooseResultForDisplay(
-					latestPpFile, outputDir.toFile(), "_pp_plot.svg", attempted);
+			// Never assemble a chart set by independently choosing the latest
+			// filename for each chart. All four must belong to ONE accepted fit.
+			StatFitRunArtifacts.Fit selectedFit = StatFitRunArtifacts.chooseFitForDisplay(
+					outputDir.toFile(), latestAcceptedFit, latestFitRequest.get() != 0);
 
-			if (histogram == null && ecdf == null && qq == null && pp == null) {
+			if (selectedFit == null) {
 				appendStatusText(System.lineSeparator()
 						+ "Abrir gráficos: nenhum SVG encontrado ainda. Rode Ajustar distribuição primeiro."
 						+ System.lineSeparator());
@@ -1861,14 +1859,10 @@ public class StatFitAssistantBox extends FrameBox {
 				return;
 			}
 
-			if (histogram != null)
-				openFile(histogram.toPath(), "Abrir histograma");
-			if (ecdf != null)
-				openFile(ecdf.toPath(), "Abrir CDF empírica");
-			if (qq != null)
-				openFile(qq.toPath(), "Abrir gráfico Q-Q");
-			if (pp != null)
-				openFile(pp.toPath(), "Abrir gráfico P-P");
+			openFile(selectedFit.histogram.toPath(), "Abrir histograma");
+			openFile(selectedFit.ecdf.toPath(), "Abrir CDF empírica");
+			openFile(selectedFit.qq.toPath(), "Abrir gráfico Q-Q");
+			openFile(selectedFit.pp.toPath(), "Abrir gráfico P-P");
 			updateState("Gráficos abertos");
 		}
 		catch (Exception ex) {
@@ -1895,9 +1889,9 @@ public class StatFitAssistantBox extends FrameBox {
 
 			Path outputDir = assistantRoot.resolve("output")
 					.resolve("statfit");
-			File report = StatFitRunArtifacts.chooseResultForDisplay(
-					latestMarkdownReportFile, outputDir.toFile(), "_statfit_report.md",
-					latestFitRequest.get() != 0);
+			StatFitRunArtifacts.Fit selectedFit = StatFitRunArtifacts.chooseFitForDisplay(
+					outputDir.toFile(), latestAcceptedFit, latestFitRequest.get() != 0);
+			File report = selectedFit == null ? null : selectedFit.markdown;
 
 			if (report == null) {
 				appendStatusText(System.lineSeparator()
@@ -1934,9 +1928,9 @@ public class StatFitAssistantBox extends FrameBox {
 
 			Path outputDir = assistantRoot.resolve("output")
 					.resolve("statfit");
-			File snippet = StatFitRunArtifacts.chooseResultForDisplay(
-					latestSnippetFile, outputDir.toFile(), "_jaamsim_distribution.cfg",
-					latestFitRequest.get() != 0);
+			StatFitRunArtifacts.Fit selectedFit = StatFitRunArtifacts.chooseFitForDisplay(
+					outputDir.toFile(), latestAcceptedFit, latestFitRequest.get() != 0);
+			File snippet = selectedFit == null ? null : selectedFit.snippet;
 
 			if (snippet == null) {
 				appendStatusText(System.lineSeparator()
