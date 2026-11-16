@@ -1069,7 +1069,10 @@ public class StatFitAssistantBox extends FrameBox {
 			String validationError = null;
 			if (result.finished && result.exitCode == 0) {
 				try {
-					verified = StatFitRunArtifacts.validatePreparation(outputDir, result.output);
+					StatFitRunArtifacts.Prepared candidate =
+							StatFitRunArtifacts.validatePreparation(outputDir, result.output);
+					StatFitRunArtifacts.recordAcceptedRun(outputDir, candidate);
+					verified = candidate;
 				}
 				catch (IOException ex) {
 					validationError = ex.getMessage();
@@ -1260,7 +1263,10 @@ public class StatFitAssistantBox extends FrameBox {
 			String validationError = null;
 			if (result.finished && result.exitCode == 0) {
 				try {
-					verified = StatFitRunArtifacts.validateFit(outputDir, result.output);
+					StatFitRunArtifacts.Fit candidate =
+							StatFitRunArtifacts.validateFit(outputDir, result.output);
+					StatFitRunArtifacts.recordAcceptedRun(outputDir, candidate);
+					verified = candidate;
 				}
 				catch (IOException ex) {
 					validationError = ex.getMessage();
