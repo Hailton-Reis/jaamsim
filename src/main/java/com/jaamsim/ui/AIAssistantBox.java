@@ -3074,13 +3074,13 @@ public class AIAssistantBox extends FrameBox {
 		// An explicitly configured extension is authoritative. If missing,
 		// never silently execute another Python module found near the CFG or
 		// in the JVM working directory. This applies equally to GUI and StatFit.
-		String propertyRoot = System.getProperty("jaamsim.assistant.root");
-		if (propertyRoot != null && !propertyRoot.trim().isEmpty())
-			return resolveAssistantRootCandidate(Paths.get(propertyRoot.trim()), "modulo_ia_offline.py");
-
-		String environmentRoot = System.getenv("JAAMSIM_ASSISTANT_ROOT");
-		if (environmentRoot != null && !environmentRoot.trim().isEmpty())
-			return resolveAssistantRootCandidate(Paths.get(environmentRoot.trim()), "modulo_ia_offline.py");
+		// The original CMD verifies the native package before setting this
+		// environment root. Do not let -Djaamsim.assistant.root supersede it.
+		String configuredRoot = AssistantLaunchSettings.preferLauncherEnvironment(
+				System.getenv("JAAMSIM_ASSISTANT_ROOT"),
+				System.getProperty("jaamsim.assistant.root"));
+		if (configuredRoot != null)
+			return resolveAssistantRootCandidate(Paths.get(configuredRoot), "modulo_ia_offline.py");
 
 		// Legacy discovery is allowed only when neither source configured a root.
 		ArrayList<Path> candidates = new ArrayList<>();
@@ -3210,12 +3210,12 @@ public class AIAssistantBox extends FrameBox {
 	}
 
 	private static String resolvePythonCommand() {
-		String configured = System.getProperty("jaamsim.python");
-		if (configured == null || configured.trim().isEmpty())
-			configured = System.getenv("JAAMSIM_PYTHON");
-		if (configured == null || configured.trim().isEmpty())
-			return "python";
-		return configured.trim();
+		// Same trust boundary as the configured assistant root. In a CMD
+		// launch, JAAMSIM_PYTHON is the interpreter validated on option 8.
+		String configured = AssistantLaunchSettings.preferLauncherEnvironment(
+				System.getenv("JAAMSIM_PYTHON"),
+				System.getProperty("jaamsim.python"));
+		return configured == null ? "python" : configured;
 	}
 
 	private static String buildModelId(File cfgFile) {
