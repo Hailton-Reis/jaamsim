@@ -50,6 +50,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -111,6 +112,8 @@ public class StatFitAssistantBox extends FrameBox {
 	private final StatFitChartView ecdfView;
 	private final StatFitChartView qqView;
 	private final StatFitChartView ppView;
+	private final AtomicLong latestPrepareRequest = new AtomicLong();
+	private final AtomicLong latestFitRequest = new AtomicLong();
 	private File preparedDataFile;
 	private File latestMarkdownReportFile;
 	private File latestJsonReportFile;
@@ -995,14 +998,16 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private void runDataAssist() {
+		long request = latestPrepareRequest.incrementAndGet();
+		preparedDataFile = null;
 		appendAssistText(System.lineSeparator() + "Preparação: analisando dados..." + System.lineSeparator());
 
-		Thread worker = new Thread(() -> runDataAssistWorker(), "JaamSim StatFit Data Assist");
+		Thread worker = new Thread(() -> runDataAssistWorker(request), "JaamSim StatFit Data Assist");
 		worker.setDaemon(true);
 		worker.start();
 	}
 
-	private void runDataAssistWorker() {
+	private void runDataAssistWorker(long request) {
 		try {
 			updateState("Preparando dados...");
 			boolean fileMode = isFileInputMode();
@@ -1034,15 +1039,14 @@ public class StatFitAssistantBox extends FrameBox {
 			}
 
 			Path script = assistantRoot.resolve("python").resolve("statfit_data_assist.py");
-			Path outputDir = assistantRoot.resolve("output")
-					.resolve("statfit")
-					.resolve("data_assist");
 			if (!Files.isRegularFile(script)) {
 				appendAssistText("Preparação: script não encontrado: "
 						+ script.toAbsolutePath() + System.lineSeparator());
 				updateState("Script não encontrado");
 				return;
 			}
+			Path outputDir = StatFitRunArtifacts.createRunDirectory(
+					assistantRoot.resolve("output").resolve("statfit"), "prepare");
 
 			if (!pastedText.isEmpty())
 				dataFile = writePastedDataFile(outputDir, pastedText).toFile();
@@ -1055,6 +1059,22 @@ public class StatFitAssistantBox extends FrameBox {
 					+ "- Pasta de saída: " + outputDir.toAbsolutePath() + System.lineSeparator());
 
 			StatFitRunResult result = executeCommand(command, assistantRoot, DATA_ASSIST_TIMEOUT_SECONDS);
+			if (request != latestPrepareRequest.get()) {
+				appendAssistText("Preparação anterior preservada em " + outputDir
+						+ ", mas não adotada porque uma nova preparação foi iniciada."
+						+ System.lineSeparator());
+				return;
+			}
+			StatFitRunArtifacts.Prepared verified = null;
+			String validationError = null;
+			if (result.finished && result.exitCode == 0) {
+				try {
+					verified = StatFitRunArtifacts.validatePreparation(outputDir, result.output);
+				}
+				catch (IOException ex) {
+					validationError = ex.getMessage();
+				}
+			}
 			StringBuilder sb = new StringBuilder();
 			sb.append(System.lineSeparator());
 			sb.append("Análise de preparação").append(System.lineSeparator());
@@ -1073,8 +1093,22 @@ public class StatFitAssistantBox extends FrameBox {
 				sb.append("----------------").append(System.lineSeparator());
 				sb.append(limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS)).append(System.lineSeparator());
 			}
+			if (verified != null) {
+				preparedDataFile = verified.csv;
+				latestMarkdownReportFile = verified.markdown;
+				sb.append("Preparação confirmada nesta execução: ")
+						.append(verified.csv.getAbsolutePath()).append(System.lineSeparator());
+				sb.append("Revise o CSV e clique em Usar CSV preparado se concordar.")
+						.append(System.lineSeparator());
+			}
+			else {
+				sb.append("Preparação não confirmada; arquivos desta execução não serão adotados.")
+						.append(System.lineSeparator());
+				if (validationError != null)
+					sb.append("Motivo: ").append(validationError).append(System.lineSeparator());
+			}
 			appendAssistText(sb.toString());
-			updateState(result.finished && result.exitCode == 0 ? "Dados preparados" : "Verifique a preparação");
+			updateState(verified != null ? "Dados preparados" : "Verifique a preparação");
 		}
 		catch (Exception ex) {
 			appendAssistText("Erro na preparação: " + ex.getClass().getSimpleName()
@@ -1109,16 +1143,10 @@ public class StatFitAssistantBox extends FrameBox {
 			sb.append("IA online usada: ").append(online).append(System.lineSeparator());
 		if (provider != null)
 			sb.append("Provedor: ").append(provider).append(System.lineSeparator());
-		if (cleanCsv != null) {
-			preparedDataFile = new File(cleanCsv);
-			sb.append("CSV limpo: ").append(cleanCsv).append(System.lineSeparator());
-			sb.append("Próximo passo: revise a aba Preparação IA e clique em Usar CSV preparado se concordar.")
-					.append(System.lineSeparator());
-		}
-		if (markdown != null) {
-			latestMarkdownReportFile = new File(markdown);
-			sb.append("Relatório: ").append(markdown).append(System.lineSeparator());
-		}
+		if (cleanCsv != null)
+			sb.append("CSV informado pelo processo: ").append(cleanCsv).append(System.lineSeparator());
+		if (markdown != null)
+			sb.append("Relatório informado pelo processo: ").append(markdown).append(System.lineSeparator());
 		if (json != null)
 			sb.append("Auditoria JSON: ").append(json).append(System.lineSeparator());
 	}
@@ -1147,15 +1175,22 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private void runStatFit() {
+		long request = latestFitRequest.incrementAndGet();
+		latestJsonReportFile = null;
+		latestSnippetFile = null;
+		latestHistogramFile = null;
+		latestEcdfFile = null;
+		latestQqFile = null;
+		latestPpFile = null;
 		appendStatusText(System.lineSeparator() + System.lineSeparator()
 				+ "StatFit: iniciando ajuste offline..." + System.lineSeparator());
 
-		Thread worker = new Thread(() -> runStatFitWorker(), "JaamSim StatFit Assistant");
+		Thread worker = new Thread(() -> runStatFitWorker(request), "JaamSim StatFit Assistant");
 		worker.setDaemon(true);
 		worker.start();
 	}
 
-	private void runStatFitWorker() {
+	private void runStatFitWorker(long request) {
 		try {
 			updateState("Preparando dados...");
 			boolean fileMode = isFileInputMode();
@@ -1194,8 +1229,13 @@ public class StatFitAssistantBox extends FrameBox {
 			}
 
 			Path script = assistantRoot.resolve("python").resolve("statfit_auxiliar.py");
-			Path outputDir = assistantRoot.resolve("output")
-					.resolve("statfit");
+			if (!Files.isRegularFile(script)) {
+				appendStatusText("StatFit: script não encontrado: " + script + System.lineSeparator());
+				updateState("Script não encontrado");
+				return;
+			}
+			Path outputDir = StatFitRunArtifacts.createRunDirectory(
+					assistantRoot.resolve("output").resolve("statfit"), "fit");
 			if (!pastedText.isEmpty())
 				dataFile = writePastedDataFile(outputDir, pastedText).toFile();
 			List<String> command = buildStatFitCommand(dataFile, script, outputDir);
@@ -1210,6 +1250,22 @@ public class StatFitAssistantBox extends FrameBox {
 			updateState("Ajustando distribuicoes...");
 
 			StatFitRunResult result = executeCommand(command, assistantRoot, STATFIT_TIMEOUT_SECONDS);
+			if (request != latestFitRequest.get()) {
+				appendStatusText("Resultado anterior preservado em " + outputDir
+						+ ", mas não adotado porque um novo ajuste foi iniciado."
+						+ System.lineSeparator());
+				return;
+			}
+			StatFitRunArtifacts.Fit verified = null;
+			String validationError = null;
+			if (result.finished && result.exitCode == 0) {
+				try {
+					verified = StatFitRunArtifacts.validateFit(outputDir, result.output);
+				}
+				catch (IOException ex) {
+					validationError = ex.getMessage();
+				}
+			}
 			StringBuilder summary = new StringBuilder();
 			summary.append(System.lineSeparator());
 			summary.append("Resultado do ajuste").append(System.lineSeparator());
@@ -1223,6 +1279,26 @@ public class StatFitAssistantBox extends FrameBox {
 				summary.append(System.lineSeparator());
 			}
 			appendReadableResultSummary(summary, result.output);
+			if (verified == null) {
+				summary.append("Resultado não confirmado: os arquivos desta execução não serão carregados.")
+						.append(System.lineSeparator());
+				if (validationError != null)
+					summary.append("Motivo: ").append(validationError).append(System.lineSeparator());
+			}
+			else {
+				latestMarkdownReportFile = verified.markdown;
+				latestJsonReportFile = verified.json;
+				latestHistogramFile = verified.histogram;
+				latestEcdfFile = verified.ecdf;
+				latestQqFile = verified.qq;
+				latestPpFile = verified.pp;
+				latestSnippetFile = verified.snippet;
+				updateDistributionTableFromJson(verified.json);
+				updateEmbeddedChartsFromJson(verified.json,
+						extractOutputValue(result.output, "Melhor distribuição:", "Melhor distribuicao:"));
+				summary.append("Arquivos de uma única execução conferidos: ")
+						.append(outputDir.toAbsolutePath()).append(System.lineSeparator());
+			}
 			appendStatusText(summary.toString());
 			StringBuilder details = new StringBuilder();
 			details.append(System.lineSeparator()).append("Detalhes técnicos do último AutoFit").append(System.lineSeparator());
@@ -1234,7 +1310,7 @@ public class StatFitAssistantBox extends FrameBox {
 					: limitOutput(result.output, MAX_PROCESS_OUTPUT_CHARS));
 			details.append(System.lineSeparator());
 			appendAssistText(details.toString());
-			if (result.finished && result.exitCode == 0) {
+			if (verified != null) {
 				SwingUtilities.invokeLater(() -> mainTabs.setSelectedIndex(1));
 				updateState("Ajuste concluido");
 			}
@@ -1272,28 +1348,16 @@ public class StatFitAssistantBox extends FrameBox {
 			sb.append("IQR: ").append(iqr).append(System.lineSeparator());
 		if (outliers != null)
 			sb.append("Possíveis outliers por IQR: ").append(outliers).append(System.lineSeparator());
+		// Parsed paths are display-only. A completed run is adopted only
+		// after StatFitRunArtifacts validates the JSON, SVGs and snippet.
 		if (markdown != null)
-			latestMarkdownReportFile = new File(markdown);
-			if (json != null) {
-				latestJsonReportFile = new File(json);
-				updateDistributionTableFromJson(latestJsonReportFile);
-				updateEmbeddedChartsFromJson(latestJsonReportFile, best);
-			}
-		if (histogram != null) {
-			latestHistogramFile = new File(histogram);
-		}
-		if (ecdf != null) {
-			latestEcdfFile = new File(ecdf);
-		}
-		if (qq != null) {
-			latestQqFile = new File(qq);
-		}
-		if (pp != null) {
-			latestPpFile = new File(pp);
-		}
-		if (snippet != null) {
-			latestSnippetFile = new File(snippet);
-		}
+			sb.append("Relatório informado: ").append(markdown).append(System.lineSeparator());
+		if (json != null)
+			sb.append("JSON informado: ").append(json).append(System.lineSeparator());
+		if (histogram != null && ecdf != null && qq != null && pp != null)
+			sb.append("Gráficos informados pelo processo: 4").append(System.lineSeparator());
+		if (snippet != null)
+			sb.append("Snippet informado: ").append(snippet).append(System.lineSeparator());
 
 		if (best != null) {
 			sb.append("Próximo passo: confira o ranking e a aba Gráficos. Use Copiar distribuição JaamSim (.cfg) somente se a candidata fizer sentido para o processo real.").append(System.lineSeparator());
@@ -1848,16 +1912,7 @@ public class StatFitAssistantBox extends FrameBox {
 	}
 
 	private static File findLatestFile(File folder, String suffix) {
-		File[] files = folder.listFiles((dir, name) -> name.endsWith(suffix));
-		if (files == null || files.length == 0)
-			return null;
-
-		File latest = files[0];
-		for (File file : files) {
-			if (file.lastModified() > latest.lastModified())
-				latest = file;
-		}
-		return latest;
+		return StatFitRunArtifacts.findLatestFile(folder, suffix);
 	}
 
 	private void appendStatusText(final String text) {
