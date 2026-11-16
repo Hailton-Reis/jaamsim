@@ -896,3 +896,76 @@ simulação científica, inferência P004/Full45 ou mesclagem do PR
 foi realizada. Recibos locais com hashes não são assinaturas,
 nem garantem integridade contra um adversário com acesso de escrita.
 Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
+
+
+## v0.67 — impedir reaproveitamento de resultados antigos após AutoFit (16/11/2026)
+
+**Candidata privada de engenharia, não instalada.** A entrada Windows
+continua `00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, sem CMD paralelo
+ou alteração do atalho. Opções 1–11 preservadas; MC-001 1–7 inalterado;
+P004 DENY / Full45 NO-GO.
+
+### Falha concreta corrigida
+
+Embora a v0.66 isolasse a gravação em `output/statfit/runs/`,
+os botões da janela StatFit — abrir gráficos, abrir último relatório
+e copiar distribuição .cfg — ainda podiam usar
+`findLatestFile(...)` como fallback quando `latest*File` fosse
+`null` depois de uma tentativa falha. Isso apresentava artefatos
+antigos como se fossem os da execução atual. Também havia uma janela
+de concorrência entre a verificação da geração da solicitação e a
+adoção dos arquivos, e callbacks Swing assíncronos podiam exibir
+gráficos de análise já substituída.
+
+### Implementação na branch draft
+
+- `StatFitRunArtifacts.chooseResultForDisplay` distingue
+  **histórico antes de uma nova tentativa** de **resultado atual
+  após iniciar AutoFit**. Se a tentativa atual não estiver concluída
+  e aceita, não há fallback para arquivos antigos.
+- Na exibição/cópia de um artefato atual, a classe verifica novamente
+  o SHA-256 contra `STATFIT_RUN_RECEIPT.json`, exigindo também
+  mesmo diretório de execução e ausência de symlink para o arquivo.
+  `Usar CSV preparado` repete essa validação.
+- `StatFitAssistantBox` serializa início e adoção de cada solicitação
+  usando o mesmo monitor por geração (AutoFit/Preparação), com
+  verificação adicional **depois** da validação dos arquivos.
+- Os callbacks Swing de gráficos e tabela só atualizam a interface
+  quando o JSON de origem ainda coincide com o relatório selecionado.
+  O início de um novo AutoFit limpa os gráficos e a tabela anteriores,
+  evitando confusão visual entre tentativas.
+- O botão de abrir pasta de resultados preserva a consulta manual
+  aos arquivos históricos; nenhuma pasta anterior foi excluída.
+
+### Verificação e pacote
+
+- [Java JDK25, **54 contratos RCL + 34 StatFit** aprovados](https://github.com/Hailton-Reis/jaamsim/actions/runs/43889760649).
+- [Python **96 testes + 6 subtestes por job**, em
+  Windows/Linux × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43889760464):
+  aprovado.
+- Novo JAR compilado e módulo `JAAM_AI_NATIVE`:
+  **38/38 arquivos SHA-256/tamanho** conferidos.
+  Manifesto SHA-256:
+  `f0fc2523d709741a1f5b33a23ff065794fb457ad05e6a3c9c718e56554d1c0e0`.
+- CMD v0.67: **2.149.688 bytes**, SHA-256
+  `84568b125ca14639c6515e82f26aff0a1e3031a317cdf2f85052dd7f5921efde`.
+  Apenas identificadores de versão, manifesto e pin SHA mudaram
+  em relação ao CMD v0.66; patch byte-reversível conferido.
+- ZIP candidato
+  `JAAM_AI_V067_CMD_ORIGINAL_SESSOES_ATUAIS_PROTEGIDAS_2026-11-16.zip`,
+  SHA-256
+  `278abde2130d6cce935846114f39e8918ca7ad178580f749b5b984c927b8539c`,
+  **101 entradas únicas** e **17 backups íntegros** v0.50–v0.66.
+- Relatório:
+  `JAAM_AI_V067_STATIC_REPORT_2026-11-16.json`.
+  Diff reversível:
+  `JAAM_AI_V067_DIFF_CMD_V066_V067.patch`.
+  Head da branch usada no CI:
+  `6d4dff1860cea106d754e5d05295393aeaa12484`.
+
+**Limites:** testes headless e hashes não representam aceitação do GUI
+no Windows. Histórico local e recibos com SHA não são assinaturas
+digitais. Nenhuma instalação, ativação do CMD, execução de modelo
+científico, inferência P004/Full45, alteração no Drive, mudança de
+atalho ou merge do PR foi realizada.
+Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
