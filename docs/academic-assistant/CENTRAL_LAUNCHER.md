@@ -1043,3 +1043,70 @@ de interpretar resultados misturados como um único ajuste.
 CMD central, PowerShell, experimento científico, P004/Full45, instalação
 ou alteração do atalho/Drive. O PR continua draft e sem merge.
 Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
+
+
+## v0.69 — impedir redirecionamento simbólico das pastas de execução StatFit (16/11/2026)
+
+**Candidata privada; não instalada.** A versão mantém o único
+`00_PROJETO_ATUAL/RODAR_JAAM_AI_COMPLETO.cmd`, no caminho original
+usado pelo atalho. O CMD foi derivado da v0.68 com substituições
+reversíveis apenas de versão, manifesto e pin SHA-256 do módulo.
+Menus 1–11, MC-001 1–7, P004 DENY e Full45 NO-GO permanecem.
+
+### Defeito concreto
+
+`createRunDirectory` usava `Files.createDirectories(statfitRoot/runs)`
+sem recusar um `runs/` que já fosse link simbólico. A chamada podia
+seguir o link e criar os resultados fora da pasta de trabalho esperada.
+Além disso, `writeReceipt` resolvia `run.toRealPath()` e aceitava os
+artefatos pelo caminho real, o que permitia gravar um recibo através
+de uma pasta de execução substituída por symlink após a validação.
+
+### Correção
+
+- `createRunDirectory` agora rejeita `runs/` simbólico e exige que
+  `runs/` seja um diretório real antes de criar a execução.
+- Novo `requireRunDirectory` exige que a pasta de execução e seu
+  pai imediato `runs/` sejam diretórios reais, sem symlink, e
+  confirma que a execução é filha direta desse diretório.
+- A mesma verificação é aplicada na validação dos arquivos,
+  gravação de recibos, adoção de artefatos e leitura do histórico.
+- O diretório raiz configurado para StatFit pode continuar usando
+  redirecionamento intencional; a restrição incide na fronteira
+  transacional `runs/` e nas pastas individuais de execução.
+- Foram acrescentadas regressões para: impedir criação através de
+  `runs/` simbólico; deixar intacta a pasta externa; rejeitar
+  validação de uma execução substituída por symlink; impedir gravação
+  de recibo nessa execução; e ignorar a execução redirecionada no
+  histórico.
+
+### Evidências automatizadas e pacote
+
+- [CI Java JDK25 — build aprovado, **54 contratos RCL + 54 StatFit**](https://github.com/Hailton-Reis/jaamsim/actions/runs/43903459615).
+- [CI Python — **96 testes + 6 subtestes por job**, Windows/Linux
+  × Python 3.11/3.14](https://github.com/Hailton-Reis/jaamsim/actions/runs/43903459586).
+- JAR e módulo nativo: **38/38 arquivos** conferidos por SHA-256 e tamanho.
+  SHA-256 de `JAAM_AI_NATIVE/MANIFEST_SHA256.json`:
+  `cffe271d391e23262afd1ae064e36bc22f557085234f125b1390ac7a49e3316c`.
+- CMD central v0.69: **2.149.688 bytes**, SHA-256
+  `5a8f35c92bd3a9e68dc060c58745136f5a395a9722497bae50d25b56e1a38af5`.
+  O diff v0.68→v0.69 é reversível e limita-se a versão,
+  nome do manifesto e pin SHA-256 do módulo.
+- ZIP candidato
+  `JAAM_AI_V069_CMD_ORIGINAL_STATFIT_SYMLINK_SAFE_2026-11-16.zip`,
+  SHA-256
+  `89e8cd06acb079455e7ddec3c69e112d28f6271aa339dbb7f62dab3763750f3a`,
+  **109 entradas únicas** e **19 backups íntegros**, v0.50–v0.68.
+- Auditoria `JAAM_AI_V069_STATIC_REPORT_2026-11-16.json`
+  e patch `JAAM_AI_V069_DIFF_CMD_V068_V069.patch`.
+- Cabeça da branch efetivamente testada:
+  `92101d98e236bd0303d570d180e37ac36f84cd80`.
+  O artefato CI foi compilado a partir do merge temporário
+  `6136900bc26429877b00215005abe958331f4540`.
+
+**Limites:** CI e auditoria estática não substituem aceite manual
+da GUI/CMD no Windows. Não houve instalação, execução do CMD,
+alteração do atalho, modificação do Drive, execução científica,
+P004 ou Full45. Recibos SHA-256 locais não são assinaturas digitais.
+O PR permanece draft e sem merge.
+Estado: `CANDIDATE_ONLY / GUI_PENDING / P004_DENY / FULL45_NO_GO`.
