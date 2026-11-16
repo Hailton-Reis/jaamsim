@@ -51,25 +51,25 @@ public final class StatFitRunArtifactsContractTest {
 	}
 
 	private static String prepareOutput(Map<String, Path> files) {
-		return "Coluna preparada: tempo\\nCSV limpo: " + files.get("csv")
-				+ "\\nRelatório Markdown: " + files.get("markdown")
-				+ "\\nRelatório JSON: " + files.get("json") + "\\n";
+		return "Coluna preparada: tempo\nCSV limpo: " + files.get("csv")
+				+ "\nRelatório Markdown: " + files.get("markdown")
+				+ "\nRelatório JSON: " + files.get("json") + "\n";
 	}
 
 	private static String fitOutput(Map<String, Path> files) {
-		return "Melhor distribuição: normal\\n"
+		return "Melhor distribuição: normal\n"
 				+ "Relatório Markdown: " + files.get("markdown")
-				+ "\\nRelatório JSON: " + files.get("json")
-				+ "\\nGráfico histograma: " + files.get("histogram")
-				+ "\\nGráfico CDF empírica: " + files.get("ecdf")
-				+ "\\nGráfico Q-Q: " + files.get("qq")
-				+ "\\nGráfico P-P: " + files.get("pp")
-				+ "\\nSnippet JaamSim: " + files.get("snippet") + "\\n";
+				+ "\nRelatório JSON: " + files.get("json")
+				+ "\nGráfico histograma: " + files.get("histogram")
+				+ "\nGráfico CDF empírica: " + files.get("ecdf")
+				+ "\nGráfico Q-Q: " + files.get("qq")
+				+ "\nGráfico P-P: " + files.get("pp")
+				+ "\nSnippet JaamSim: " + files.get("snippet") + "\n";
 	}
 
 	private static Map<String, Path> putPrepared(Path run) throws Exception {
 		Map<String, Path> files = new HashMap<>();
-		files.put("csv", put(run, "tempo_dados_preparados.csv", "tempo\\n1\\n2\\n"));
+		files.put("csv", put(run, "tempo_dados_preparados.csv", "tempo\n1\n2\n"));
 		files.put("markdown", put(run, "tempo_data_assist.md", "# preparado"));
 		String json = "{\"online_assist_enabled\":false,\"online_assist_used\":false,"
 				+ "\"python_runtime\":" + runtime() + ","
