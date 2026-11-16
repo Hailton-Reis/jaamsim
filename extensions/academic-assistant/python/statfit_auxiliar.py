@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Callable
 
 import assistant_paths
+import runtime_provenance
 
 
 ROOT = assistant_paths.ASSISTANT_ROOT
@@ -2083,7 +2084,9 @@ def write_outputs(
     md_path = output_dir / f"{stem}_statfit_report.md"
     chart_paths = write_chart_outputs(report, output_dir)
     report.chart_files = {key: str(path) for key, path in chart_paths.items()}
-    json_path.write_text(json.dumps(asdict(report), indent=2), encoding="utf-8")
+    payload = asdict(report)
+    payload["python_runtime"] = runtime_provenance.capture_runtime(Path(__file__))
+    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     md_path.write_text(
         render_markdown(
             report,
