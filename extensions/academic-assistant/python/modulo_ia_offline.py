@@ -24,6 +24,7 @@ import snapshot_analyzer
 import tcc_llm_assist
 
 import assistant_paths
+import runtime_provenance
 
 
 DEFAULT_OUTPUT_DIR = assistant_paths.OUTPUT_DIR / "offline-review"
@@ -905,6 +906,7 @@ def write_offline_outputs(
     reviewed_snapshot_file: str | None,
 ) -> tuple[Path, Path, Path, Path, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
+    python_runtime = runtime_provenance.capture_runtime(Path(__file__))
     json_path = output_dir / f"{analysis.model_id}_offline_review.json"
     markdown_path = output_dir / f"{analysis.model_id}_offline_review.md"
     suggestions_path = output_dir / f"{analysis.model_id}_suggestions_status.json"
@@ -946,12 +948,14 @@ def write_offline_outputs(
         "suggestion_decision_audit": [asdict(audit) for audit in suggestion_audit],
         "local_suggestions": [asdict(suggestion) for suggestion in local_suggestions],
         "status_transfer": status_transfer,
+        "python_runtime": python_runtime,
         "analysis": asdict(analysis),
     }
     suggestions_payload = {
         "model_id": analysis.model_id,
         "input_file": input_file,
         "allowed_statuses": sorted(ALLOWED_SUGGESTION_STATUSES),
+        "python_runtime": python_runtime,
         "instructions": (
             "Edite apenas os campos status/status_reason/status_actor/status_updated_at. "
             "Status aceito nao aplica alteracao automaticamente."
