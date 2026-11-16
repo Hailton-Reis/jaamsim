@@ -54,10 +54,14 @@ jobs:
           mkdir -p build/test-classes
           javac -encoding UTF-8 -cp build/jars/JaamSim2026-03.jar \
             -d build/test-classes \
-            src/test/java/com/jaamsim/ui/OfflineRclReportContractTest.java
+            src/test/java/com/jaamsim/ui/OfflineRclReportContractTest.java \
+            src/test/java/com/jaamsim/ui/StatFitRunArtifactsContractTest.java
           java -Djava.awt.headless=true \
             -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
             com.jaamsim.ui.OfflineRclReportContractTest
+          java -Djava.awt.headless=true \
+            -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
+            com.jaamsim.ui.StatFitRunArtifactsContractTest
       - name: Package native candidate with Python support
         shell: bash
         run: python3 scripts/package_native_candidate.py
