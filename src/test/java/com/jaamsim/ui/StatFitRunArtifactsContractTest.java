@@ -207,6 +207,70 @@ public final class StatFitRunArtifactsContractTest {
 		expectBlocked("malformed command path rejected",
 				() -> StatFitRunArtifacts.requireCurrentRunFile(fit,
 						"Relatório JSON: ../tempo_statfit_report.json", "_statfit_report.json", "Relatório JSON:"));
+		// An older accepted run remains independent from later attempts.
+		// The current (first) fit had its snippet deleted, so it cannot
+		// qualify as a complete bundle even though its JSON/plots remain.
+		expect(StatFitRunArtifacts.chooseFitForDisplay(root.toFile(), validFit, true) == null,
+				"a partial current fit cannot expose a chart bundle");
+
+		// Deliberately lexically later than normal UTC run names to avoid
+		// timing-based order assumptions in this synthetic contract.
+		Path newestRun = Files.createDirectory(root.resolve("runs")
+				.resolve("fit_99999999_999999_999_complete"));
+		Map<String, Path> newestFiles = putFit(newestRun);
+		StatFitRunArtifacts.Fit newestFit =
+				StatFitRunArtifacts.validateFit(newestRun, fitOutput(newestFiles));
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile()) == null,
+				"a new run is not accepted merely because all seven files exist");
+		StatFitRunArtifacts.recordAcceptedRun(newestRun, newestFit);
+		StatFitRunArtifacts.Fit chosen =
+				StatFitRunArtifacts.findLatestAcceptedFit(root.toFile());
+		expect(chosen != null && chosen.json.toPath().equals(newestFiles.get("json")),
+				"historical fit resolution chooses one coherent newest accepted run");
+		expect(chosen.histogram.toPath().getParent().equals(chosen.qq.toPath().getParent())
+				&& chosen.qq.toPath().getParent().equals(chosen.snippet.toPath().getParent()),
+				"histogram, Q-Q and snippet must come from one run");
+		expect(StatFitRunArtifacts.chooseFitForDisplay(
+				root.toFile(), newestFit, true) != null,
+				"current fit with seven intact hash-pinned artifacts can be displayed");
+		expect(StatFitRunArtifacts.chooseFitForDisplay(
+				root.toFile(), validFit, true) == null,
+				"an earlier, now incomplete run cannot impersonate the current run");
+
+		String originalHistogram = Files.readString(newestFiles.get("histogram"));
+		Files.writeString(newestFiles.get("histogram"), "modified after receipt");
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile()) == null,
+				"a single altered SVG invalidates the whole historical fit bundle");
+		expect(StatFitRunArtifacts.chooseFitForDisplay(
+				root.toFile(), newestFit, true) == null,
+				"tampered current SVG blocks all chart/report/snippet actions");
+		Files.writeString(newestFiles.get("histogram"), originalHistogram);
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile()) != null,
+				"an intact fit bundle is again discoverable");
+
+		Path incompleteNewest = Files.createDirectory(root.resolve("runs")
+				.resolve("fit_99999999_999999_zzz_partial"));
+		put(incompleteNewest, "untrusted_histograma.svg", "<svg/>");
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile())
+				.json.toPath().equals(newestFiles.get("json")),
+				"later partial run cannot replace the most recent accepted bundle");
+		String receiptText = Files.readString(newestRun.resolve("STATFIT_RUN_RECEIPT.json"));
+		Files.writeString(newestRun.resolve("STATFIT_RUN_RECEIPT.json"),
+				receiptText.replace("\"kind\":\"fit\"", "\"kind\":\"prepare\""));
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile()) == null,
+				"a preparation receipt cannot impersonate an accepted fit");
+		Files.writeString(newestRun.resolve("STATFIT_RUN_RECEIPT.json"), receiptText);
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(root.toFile()) != null,
+				"restored fit receipt allows intact historical bundle");
+
+		Path looseLegacy = Files.createTempDirectory("jaam-statfit-legacy-loose-");
+		put(looseLegacy, "old_statfit_report.md", "Unverified old output");
+		put(looseLegacy, "old_histograma.svg", "<svg/>");
+		expect(StatFitRunArtifacts.findLatestAcceptedFit(looseLegacy.toFile()) == null,
+				"loose legacy files are not assembled into a verified AutoFit");
+		expect(StatFitRunArtifacts.chooseFitForDisplay(
+				looseLegacy.toFile(), null, false) == null,
+				"legacy archives remain manual-only, not silently treated as validated");
 		System.out.println("STATFIT_RUN_ARTIFACT_CONTRACT_OK " + checks);
 	}
 }
