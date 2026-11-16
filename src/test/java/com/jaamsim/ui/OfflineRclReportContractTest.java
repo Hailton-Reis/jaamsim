@@ -355,10 +355,10 @@ public final class OfflineRclReportContractTest {
 		expectBlocked(verifier, report, cfg, assistantRoot);
 
 		Files.writeString(status, addRuntime(statuses(cfg, "demo"), runtime));
-		String wrongScript = runtime.replace(
+		String wrongScriptRuntime = runtime.replace(
 				escape(fixtureScript.toRealPath().toString()),
 				escape(python.resolve("another_script.py").toString()));
-		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), wrongScript));
+		Files.writeString(report, addRuntime(report(cfg, "demo", false, false), wrongScriptRuntime));
 		expectBlocked(verifier, report, cfg, assistantRoot);
 
 		System.out.println("RCL_REPORT_PROVENANCE_CONTRACT_OK " + checks);
