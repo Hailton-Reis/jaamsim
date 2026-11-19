@@ -22,6 +22,8 @@ import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 
 /** Deliberately separate from the normal chat and JaamSim model state. */
 final class C2PreflightPanel extends JPanel {
@@ -53,7 +55,8 @@ final class C2PreflightPanel extends JPanel {
         note.setRows(3);
         note.setEditable(false);
         note.setOpaque(false);
-        add(note, BorderLayout.NORTH);
+        JPanel topPanel = new JPanel(new BorderLayout(6, 6));
+        topPanel.add(note, BorderLayout.NORTH);
 
         JPanel form = new JPanel(new GridBagLayout());
         GridBagConstraints g = new GridBagConstraints();
@@ -85,14 +88,28 @@ final class C2PreflightPanel extends JPanel {
         controls.add(stateLabel);
         g.gridy = 4; g.fill = GridBagConstraints.HORIZONTAL;
         form.add(controls, g);
-        add(form, BorderLayout.CENTER);
+        topPanel.add(form, BorderLayout.CENTER);
+        add(topPanel, BorderLayout.NORTH);
         resultsArea.setEditable(false);
         resultsArea.setLineWrap(true);
         resultsArea.setWrapStyleWord(true);
         JScrollPane scroll = new JScrollPane(resultsArea);
         scroll.setBorder(BorderFactory.createTitledBorder("Fontes e citações — sem resposta de LLM"));
-        add(scroll, BorderLayout.SOUTH);
+        add(scroll, BorderLayout.CENTER);
         runButton.addActionListener(e -> beginPreflight());
+        // A previously retrieved citation never remains visible for a new query/corpus.
+        DocumentListener staleResults = new DocumentListener() {
+            private void changed() {
+                resultsArea.setText("");
+                stateLabel.setText("Entrada alterada — execute nova consulta");
+            }
+            @Override public void insertUpdate(DocumentEvent event) { changed(); }
+            @Override public void removeUpdate(DocumentEvent event) { changed(); }
+            @Override public void changedUpdate(DocumentEvent event) { changed(); }
+        };
+        queryArea.getDocument().addDocumentListener(staleResults);
+        corpusField.getDocument().addDocumentListener(staleResults);
+        manifestField.getDocument().addDocumentListener(staleResults);
     }
 
     private void choose(boolean directory) {
@@ -146,6 +163,13 @@ final class C2PreflightPanel extends JPanel {
                 runButton.setEnabled(true);
                 try {
                     C2PreflightRunner.Outcome result = get();
+                    if (!question.equals(queryArea.getText())
+                            || !corpus.equals(corpusField.getText())
+                            || !manifest.equals(manifestField.getText())) {
+                        resultsArea.setText("Resultado descartado: os parâmetros foram alterados durante a consulta.");
+                        stateLabel.setText("Descartado — consulte novamente");
+                        return;
+                    }
                     resultsArea.setText(result.displayText());
                     resultsArea.setCaretPosition(0);
                     stateLabel.setText("Pré-validação concluída — sem LLM");

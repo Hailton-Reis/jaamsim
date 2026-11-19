@@ -72,6 +72,30 @@ jobs:
           java -Djava.awt.headless=true \
             -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
             com.jaamsim.ui.C2PythonInteropContractTest python3
+      - name: C2 real Swing virtual-desktop preflight (synthetic only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v xvfb-run >/dev/null 2>&1 || ! command -v xauth >/dev/null 2>&1; then
+            sudo apt-get update -y
+            sudo apt-get install -y xvfb xauth
+          fi
+          javac -encoding UTF-8 -cp build/jars/JaamSim2026-03.jar \
+            -d build/test-classes \
+            src/test/java/com/jaamsim/ui/C2PreflightSwingSmokeTest.java
+          mkdir -p build/c2-gui-evidence
+          xvfb-run -a -s "-screen 0 1280x960x24" java -Djava.awt.headless=false \
+            -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
+            com.jaamsim.ui.C2PreflightSwingSmokeTest \
+            "$PWD/extensions/academic-assistant" "$(command -v python3)" "$PWD/build/c2-gui-evidence"
+      - name: Upload synthetic GUI screenshots (not Windows acceptance)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2-gui-virtual-screen-evidence
+          path: build/c2-gui-evidence/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Package native candidate with Python support
         shell: bash
         run: python3 scripts/package_native_candidate.py
@@ -87,3 +111,34 @@ jobs:
           name: jaamsim-native-candidate
           path: build/jars/JaamSim2026-03.jar
           retention-days: 7
+
+  c2-windows-headless:
+    name: Windows C2 Swing component + Python subprocess (headless)
+    needs: compile-java25
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/download-artifact@v4
+        with:
+          name: jaamsim-native-candidate
+          path: build/jars
+      - name: Validate Windows JPanel / C2 process with synthetic corpus
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build/test-classes | Out-Null
+          New-Item -ItemType Directory -Force -Path build/c2-gui-evidence | Out-Null
+          & javac -encoding UTF-8 -cp "build/jars/JaamSim2026-03.jar" -d "build/test-classes" "src/test/java/com/jaamsim/ui/C2PreflightSwingSmokeTest.java"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $assistantRoot = Join-Path $env:GITHUB_WORKSPACE "extensions/academic-assistant"
+          $python = (Get-Command python).Source
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "build/c2-gui-evidence"
+          & java "-Djava.awt.headless=true" "-cp" "build/test-classes;build/jars/JaamSim2026-03.jar" "com.jaamsim.ui.C2PreflightSwingSmokeTest" $assistantRoot $python $evidence
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
