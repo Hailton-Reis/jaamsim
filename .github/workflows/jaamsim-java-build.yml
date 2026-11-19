@@ -173,6 +173,24 @@ jobs:
             throw "Windows preflight report contract failed"
           }
           Write-Output "C2_WINDOWS_MANUAL_HARNESS_PREFLIGHT_PASS files=$($report.manifest_files_verified)"
+      - name: Windows PowerShell 5.1 acceptance-script compatibility (NO GUI)
+        shell: pwsh
+        run: |
+          $native = Join-Path $env:GITHUB_WORKSPACE "build/c2-lab-unpacked/JAAM_AI_NATIVE"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "build/c2-acceptance-preflight/ps51"
+          $ps51 = Join-Path $env:WINDIR "System32/WindowsPowerShell/v1.0/powershell.exe"
+          if (-not (Test-Path -LiteralPath $ps51 -PathType Leaf)) { throw "Windows PowerShell 5.1 missing" }
+          & $ps51 -NoProfile -ExecutionPolicy Bypass -File "scripts/windows/JAAM_AI_C2_ACCEPTANCE_LAB.ps1" -NativeRoot $native -EvidenceRoot $evidence -JavaPath (Get-Command java).Source -PythonPath (Get-Command python).Source -PreflightOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $reports = @(Get-ChildItem -Path $evidence -Filter "acceptance_report.json" -Recurse -File)
+          if ($reports.Count -ne 1) { throw "Windows PowerShell 5.1 preflight report missing" }
+          $report = Get-Content -LiteralPath $reports[0].FullName -Raw | ConvertFrom-Json
+          if ($report.manifest_files_verified -lt 30 -or
+              $report.status -ne "PREFLIGHT_ONLY_MANUAL_ACCEPTANCE_PENDING" -or
+              $report.manual_gui_accepted -ne $false) {
+            throw "Windows PowerShell 5.1 acceptance contract failed"
+          }
+          Write-Output "C2_WINDOWS_POWERSHELL_51_PREFLIGHT_PASS files=$($report.manifest_files_verified)"
       - name: Upload Windows acceptance preflight (NOT manual GUI approval)
         if: always()
         uses: actions/upload-artifact@v4
