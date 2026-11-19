@@ -34,7 +34,7 @@ function Exe([string]$name) {
 function SaveJson([string]$target, [object]$data) {
     [IO.File]::WriteAllText($target,
         ((ConvertTo-Json -InputObject $data -Depth 12) + [Environment]::NewLine),
-        (New-Object Text.UTF8Encoding($false)))
+        ([Text.UTF8Encoding]::new($false)))
 }
 function Quote([string]$x) {
     if ($x.Contains('"') -or $x.Contains([char]10) -or $x.Contains([char]13)) {
@@ -160,7 +160,7 @@ Copy-Item -LiteralPath $docManifest -Destination $manifestCopy
 $corrupt = Join-Path $lab 'corpus_adulterado'
 Copy-Item -LiteralPath $corpus -Destination $corrupt -Recurse
 [IO.File]::WriteAllText((Join-Path $corrupt 'guia_sintetico.txt'), 'ALTERACAO SOMENTE NA COPIA',
-    (New-Object Text.UTF8Encoding($false)))
+    ([Text.UTF8Encoding]::new($false)))
 $corruptManifest = Join-Path $lab 'manifest_adulterado.json'
 Copy-Item -LiteralPath $docManifest -Destination $corruptManifest
 $report.cfg_source = $original
@@ -212,7 +212,7 @@ try {
         $reply = Read-Host ("Digite CAPTURAR para screenshot {0}, ou PULAR" -f $case.id)
         if ($reply -eq 'CAPTURAR') {
             $screen = [Windows.Forms.SystemInformation]::VirtualScreen
-            $bitmap = New-Object Drawing.Bitmap($screen.Width,$screen.Height)
+            $bitmap = [System.Drawing.Bitmap]::new($screen.Width,$screen.Height)
             $graphics = [Drawing.Graphics]::FromImage($bitmap)
             $shot = Join-Path $session ($case.id+'.png')
             try {
