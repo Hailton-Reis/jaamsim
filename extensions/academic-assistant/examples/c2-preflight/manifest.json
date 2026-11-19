@@ -1,0 +1,17 @@
+{
+  "schema": "jaam.ai.c2.corpus_manifest.v1",
+  "corpus_version": "SYNTHETIC_PRE_G0_2026-11-16",
+  "documents": [
+    {
+      "source_id": "GUIA_SYNTH",
+      "path": "guia_sintetico.txt",
+      "sha256": "91ebb68d85bc572dd7a6c4af27b210d425efad7e78a5d97c0b8d6bdd617f7bf2"
+    },
+    {
+      "source_id": "ADVERSARIAL_SYNTH",
+      "path": "nota_de_confianca.md",
+      "sha256": "d65f9644036e7003ce579c770a91b121cda7dc0eaaa956e683eec7175fff6e5c"
+    }
+  ],
+  "rights": "Synthetic only. Not official JaamSim corpus."
+}

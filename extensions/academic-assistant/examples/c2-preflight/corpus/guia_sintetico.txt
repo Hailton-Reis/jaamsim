@@ -1,0 +1,5 @@
+Um modelo de filas possui chegada de entidades, uma Queue e um Server.
+O tempo de serviço e a taxa de chegada devem ser especificados com unidade.
+
+A validação de modelo não se resume à verificação sintática.
+Comparar resultados com o processo real exige dados empíricos e critérios definidos.

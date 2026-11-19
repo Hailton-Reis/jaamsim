@@ -257,6 +257,7 @@ public class AIAssistantBox extends FrameBox {
 
 		JTabbedPane tabs = new JTabbedPane();
 		tabs.addTab("Conversa", chatPanel);
+		tabs.addTab("Documentos C2 (prévia)", new C2PreflightPanel());
 		tabs.addTab("Configurações", configPanel);
 		getContentPane().setBackground(SURFACE_COLOR);
 		getContentPane().add(tabs, BorderLayout.CENTER);

@@ -46,6 +46,8 @@ jobs:
           test -s "$jar_file"
           jar tf "$jar_file" | grep -qx "com/jaamsim/ui/AIAssistantBox.class"
           jar tf "$jar_file" | grep -qx "com/jaamsim/ui/StatFitAssistantBox.class"
+          jar tf "$jar_file" | grep -qx "com/jaamsim/ui/C2PreflightPanel.class"
+          jar tf "$jar_file" | grep -qx "com/jaamsim/ui/C2PreflightRunner.class"
           echo "CANDIDATE_BUILT_NO_GUI_ACCEPTANCE $(sha256sum "$jar_file")"
       - name: Check RCL report provenance contract (headless)
         shell: bash
@@ -55,13 +57,21 @@ jobs:
           javac -encoding UTF-8 -cp build/jars/JaamSim2026-03.jar \
             -d build/test-classes \
             src/test/java/com/jaamsim/ui/OfflineRclReportContractTest.java \
-            src/test/java/com/jaamsim/ui/StatFitRunArtifactsContractTest.java
+            src/test/java/com/jaamsim/ui/StatFitRunArtifactsContractTest.java \
+            src/test/java/com/jaamsim/ui/C2PreflightRunnerContractTest.java \
+            src/test/java/com/jaamsim/ui/C2PythonInteropContractTest.java
           java -Djava.awt.headless=true \
             -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
             com.jaamsim.ui.OfflineRclReportContractTest
           java -Djava.awt.headless=true \
             -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
             com.jaamsim.ui.StatFitRunArtifactsContractTest
+          java -Djava.awt.headless=true \
+            -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
+            com.jaamsim.ui.C2PreflightRunnerContractTest
+          java -Djava.awt.headless=true \
+            -cp "build/test-classes:build/jars/JaamSim2026-03.jar" \
+            com.jaamsim.ui.C2PythonInteropContractTest python3
       - name: Package native candidate with Python support
         shell: bash
         run: python3 scripts/package_native_candidate.py
