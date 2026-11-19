@@ -11,6 +11,7 @@ import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 
 import javax.swing.BorderFactory;
@@ -32,6 +33,11 @@ final class C2PreflightPanel extends JPanel {
     private final JTextArea queryArea = new JTextArea(3, 55);
     private final JTextArea resultsArea = new JTextArea(15, 55);
     private final JButton runButton = new JButton("Recuperar documentos (prévia)");
+    private final JButton cancelButton = new JButton("Cancelar");
+    // Mutated only on the Swing EDT. Equality of input strings alone misses ABA changes.
+    private long inputRevision;
+    private boolean cancellationRequested;
+    private SwingWorker<C2PreflightRunner.Outcome, Void> activeWorker;
     private final JLabel stateLabel = new JLabel("Inativo — nenhuma consulta realizada");
 
     C2PreflightPanel() {
@@ -85,6 +91,8 @@ final class C2PreflightPanel extends JPanel {
         form.add(new JScrollPane(queryArea), g);
         JPanel controls = new JPanel(new FlowLayout(FlowLayout.LEFT));
         controls.add(runButton);
+        cancelButton.setEnabled(false);
+        controls.add(cancelButton);
         controls.add(stateLabel);
         g.gridy = 4; g.fill = GridBagConstraints.HORIZONTAL;
         form.add(controls, g);
@@ -97,9 +105,11 @@ final class C2PreflightPanel extends JPanel {
         scroll.setBorder(BorderFactory.createTitledBorder("Fontes e citações — sem resposta de LLM"));
         add(scroll, BorderLayout.CENTER);
         runButton.addActionListener(e -> beginPreflight());
+        cancelButton.addActionListener(e -> cancelPreflight());
         // A previously retrieved citation never remains visible for a new query/corpus.
         DocumentListener staleResults = new DocumentListener() {
             private void changed() {
+                inputRevision++;
                 resultsArea.setText("");
                 stateLabel.setText("Entrada alterada — execute nova consulta");
             }
@@ -125,7 +135,22 @@ final class C2PreflightPanel extends JPanel {
         }
     }
 
+    private void cancelPreflight() {
+        SwingWorker<C2PreflightRunner.Outcome, Void> worker = activeWorker;
+        if (worker == null)
+            return;
+        // Even a fully calculated result still waiting on the EDT must not reappear.
+        cancellationRequested = true;
+        inputRevision++;
+        resultsArea.setText("Cancelamento solicitado. A consulta não produzirá evidências.");
+        stateLabel.setText("Cancelando…");
+        cancelButton.setEnabled(false);
+        worker.cancel(true);
+    }
+
     private void beginPreflight() {
+        if (activeWorker != null || !runButton.isEnabled())
+            return;
         String rootSetting = AssistantLaunchSettings.preferLauncherEnvironment(
                 System.getenv("JAAMSIM_ASSISTANT_ROOT"),
                 System.getProperty("jaamsim.assistant.root"));
@@ -134,6 +159,7 @@ final class C2PreflightPanel extends JPanel {
                     + " Não buscarei scripts próximos ao modelo .cfg.");
             return;
         }
+        final long submittedRevision = inputRevision;
         final String question = queryArea.getText();
         final String corpus = corpusField.getText();
         final String manifest = manifestField.getText();
@@ -150,9 +176,11 @@ final class C2PreflightPanel extends JPanel {
             return;
         }
         runButton.setEnabled(false);
+        cancelButton.setEnabled(true);
+        cancellationRequested = false;
         stateLabel.setText("Verificando fontes locais…");
         resultsArea.setText("Consulta em execução no processo Python local. Nenhum LLM é acionado.");
-        new SwingWorker<C2PreflightRunner.Outcome, Void>() {
+        activeWorker = new SwingWorker<C2PreflightRunner.Outcome, Void>() {
             @Override
             protected C2PreflightRunner.Outcome doInBackground() throws Exception {
                 return C2PreflightRunner.execute(root, corpusPath, manifestPath,
@@ -160,10 +188,15 @@ final class C2PreflightPanel extends JPanel {
             }
             @Override
             protected void done() {
-                runButton.setEnabled(true);
                 try {
+                    if (cancellationRequested || isCancelled()) {
+                        resultsArea.setText("Consulta cancelada. Nenhuma evidência foi reutilizada.");
+                        stateLabel.setText("Cancelada");
+                        return;
+                    }
                     C2PreflightRunner.Outcome result = get();
-                    if (!question.equals(queryArea.getText())
+                    if (inputRevision != submittedRevision
+                            || !question.equals(queryArea.getText())
                             || !corpus.equals(corpusField.getText())
                             || !manifest.equals(manifestField.getText())) {
                         resultsArea.setText("Resultado descartado: os parâmetros foram alterados durante a consulta.");
@@ -179,13 +212,24 @@ final class C2PreflightPanel extends JPanel {
                     resultsArea.setText("Pré-validação interrompida.");
                     stateLabel.setText("Interrompida");
                 }
+                catch (CancellationException error) {
+                    resultsArea.setText("Consulta cancelada. Nenhuma evidência foi reutilizada.");
+                    stateLabel.setText("Cancelada");
+                }
                 catch (ExecutionException error) {
                     Throwable cause = error.getCause();
                     resultsArea.setText(cause != null && cause.getMessage() != null
                             ? cause.getMessage() : "Pré-validação bloqueada.");
                     stateLabel.setText("Bloqueada");
                 }
+                finally {
+                    activeWorker = null;
+                    runButton.setEnabled(true);
+                    cancelButton.setEnabled(false);
+                    cancellationRequested = false;
+                }
             }
-        }.execute();
+        };
+        activeWorker.execute();
     }
 }
