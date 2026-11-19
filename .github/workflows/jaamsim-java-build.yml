@@ -10,6 +10,8 @@ on:
       - "build.xml"
       - "scripts/build.sh"
       - "scripts/package_native_candidate.py"
+      - "scripts/windows/**"
+      - "docs/academic-assistant/C2_WINDOWS_MANUAL_ACCEPTANCE_V08.md"
       - ".github/workflows/jaamsim-java-build.yml"
   workflow_dispatch:
 
@@ -142,3 +144,58 @@ jobs:
           $evidence = Join-Path $env:GITHUB_WORKSPACE "build/c2-gui-evidence"
           & java "-Djava.awt.headless=true" "-cp" "build/test-classes;build/jars/JaamSim2026-03.jar" "com.jaamsim.ui.C2PreflightSwingSmokeTest" $assistantRoot $python $evidence
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: jaam-ai-native-module
+          path: build/c2-lab-package
+      - name: Windows acceptance harness preflight (NO interactive GUI)
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:GITHUB_WORKSPACE "build/c2-lab-package/jaam-ai-native-candidate.zip"
+          $unpacked = Join-Path $env:GITHUB_WORKSPACE "build/c2-lab-unpacked"
+          if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw "Native CI package missing" }
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          $native = Join-Path $unpacked "JAAM_AI_NATIVE"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "build/c2-acceptance-preflight"
+          $java = (Get-Command java).Source
+          $python = (Get-Command python).Source
+          & pwsh -NoProfile -File "scripts/windows/JAAM_AI_C2_ACCEPTANCE_LAB.ps1" -NativeRoot $native -EvidenceRoot $evidence -JavaPath $java -PythonPath $python -PreflightOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $reports = @(Get-ChildItem -Path $evidence -Filter "acceptance_report.json" -Recurse -File)
+          if ($reports.Count -ne 1) { throw "Expected exactly one preflight report" }
+          $report = Get-Content -LiteralPath $reports[0].FullName -Raw | ConvertFrom-Json
+          if ($report.schema -ne "jaam.ai.c2.windows_acceptance_lab.v1" -or
+              $report.status -ne "PREFLIGHT_ONLY_MANUAL_ACCEPTANCE_PENDING" -or
+              $report.manifest_files_verified -lt 30 -or
+              $report.manual_gui_accepted -ne $false -or
+              $report.p004 -ne "DENY" -or $report.full45 -ne "NO_GO") {
+            throw "Windows preflight report contract failed"
+          }
+          Write-Output "C2_WINDOWS_MANUAL_HARNESS_PREFLIGHT_PASS files=$($report.manifest_files_verified)"
+      - name: Windows PowerShell 5.1 acceptance-script compatibility (NO GUI)
+        shell: pwsh
+        run: |
+          $native = Join-Path $env:GITHUB_WORKSPACE "build/c2-lab-unpacked/JAAM_AI_NATIVE"
+          $evidence = Join-Path $env:GITHUB_WORKSPACE "build/c2-acceptance-preflight/ps51"
+          $ps51 = Join-Path $env:WINDIR "System32/WindowsPowerShell/v1.0/powershell.exe"
+          if (-not (Test-Path -LiteralPath $ps51 -PathType Leaf)) { throw "Windows PowerShell 5.1 missing" }
+          & $ps51 -NoProfile -ExecutionPolicy Bypass -File "scripts/windows/JAAM_AI_C2_ACCEPTANCE_LAB.ps1" -NativeRoot $native -EvidenceRoot $evidence -JavaPath (Get-Command java).Source -PythonPath (Get-Command python).Source -PreflightOnly
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $reports = @(Get-ChildItem -Path $evidence -Filter "acceptance_report.json" -Recurse -File)
+          if ($reports.Count -ne 1) { throw "Windows PowerShell 5.1 preflight report missing" }
+          $report = Get-Content -LiteralPath $reports[0].FullName -Raw | ConvertFrom-Json
+          if ($report.manifest_files_verified -lt 30 -or
+              $report.status -ne "PREFLIGHT_ONLY_MANUAL_ACCEPTANCE_PENDING" -or
+              $report.manual_gui_accepted -ne $false) {
+            throw "Windows PowerShell 5.1 acceptance contract failed"
+          }
+          Write-Output "C2_WINDOWS_POWERSHELL_51_PREFLIGHT_PASS files=$($report.manifest_files_verified)"
+      - name: Upload Windows acceptance preflight (NOT manual GUI approval)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: c2-windows-acceptance-preflight-only
+          path: build/c2-acceptance-preflight/**/acceptance_report.json
+          if-no-files-found: ignore
+          retention-days: 7
