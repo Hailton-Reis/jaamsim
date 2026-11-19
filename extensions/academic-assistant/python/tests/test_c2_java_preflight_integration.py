@@ -34,7 +34,7 @@ def _isolated_cli(tmp_path, message, *, env=None):
         "    raise AssertionError('PROVEDOR CHAMADO — indevido')\n",
         encoding="utf-8",
     )
-    command = [sys.executable, "-E", "-s", str(scripts / "c2_chat_bridge.py"),
+    command = [sys.executable, "-E", "-s", "-X", "utf8", str(scripts / "c2_chat_bridge.py"),
                "--message=" + message,
                "--corpus-root=" + str(EXAMPLE / "corpus"),
                "--manifest=" + str(EXAMPLE / "manifest.json"),
@@ -96,6 +96,7 @@ def test_java_cli_cannot_be_injected_with_pythonpath(tmp_path):
 
 @pytest.mark.parametrize("line", [
     "args.add(\"-E\")", "args.add(\"-s\")",
+    "args.add(\"-X\")", "args.add(\"utf8\")",
     'args.add("--message=" + question)',
     'args.add("--manifest=" + manifestFile)',
     "process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS)",

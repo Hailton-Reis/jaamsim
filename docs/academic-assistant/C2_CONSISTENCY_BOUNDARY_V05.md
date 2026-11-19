@@ -47,3 +47,9 @@ A primeira execução da CI em 19/11/2026 identificou dois problemas reais de in
 2. O checkout Windows convertia as quebras de linha de documentos sintéticos para CRLF, invalidando os hashes SHA-256 fixados no manifesto. O corpus C2 passou a conter `.gitattributes` para preservar LF em `.txt`, `.md` e `.json`. O ensaio Java->Python também passou a capturar stdout/stderr em arquivos UTF-8, como o executor real, evitando uma diferença de captura observada nos jobs Windows.
 
 Essas correções são candidatas para rerun da CI Linux/Windows e JDK25. Os bloqueios operacionais e científicos permanecem inalterados.
+
+### Terceira correção da CI Windows (compatibilidade real)
+
+No Windows, `os.open(..., os.O_RDONLY)` usa modo texto por padrão e o CRT transforma CRLF em LF ao ler arquivos, invalidando o SHA-256 dos **bytes originais**. O retriever agora força `O_BINARY` (somente quando disponível), inclusive ao ler o manifesto. A comparação permanece de **bytes reais**; não normaliza conteúdo adulterado.
+
+Além disso, `python -E` ignora `PYTHONIOENCODING` e, em Windows, `ensure_ascii=False` podia imprimir caracteres CP1252, corrompendo o JSON recebido pelo Java em UTF-8. O subprocesso passa a iniciar `python -E -s -X utf8` para fixar a codificação de saída, independentemente do ambiente herdado. Os testes simulam exatamente a lista de flags e mantêm o contrato de bytes.

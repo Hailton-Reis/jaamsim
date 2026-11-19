@@ -99,6 +99,9 @@ final class C2PreflightRunner {
         // Exclude PYTHONPATH/PYTHONHOME and per-user site packages; retain script-dir imports.
         args.add("-E");
         args.add("-s");
+        // -E ignores PYTHONIOENCODING; -X utf8 pins stdout UTF-8 on Windows.
+        args.add("-X");
+        args.add("utf8");
         args.add(script.toString());
         args.add("--message=" + question);
         args.add("--corpus-root=" + corpus);

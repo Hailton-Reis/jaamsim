@@ -143,7 +143,7 @@ def _open_declared(root: Path, relative: Path, limit: int) -> bytes:
         current = current / part
         _no_reparse(current)
     try:
-        fd = os.open(current, os.O_RDONLY | nofollow)
+        fd = os.open(current, os.O_RDONLY | nofollow | getattr(os, "O_BINARY", 0))
     except OSError as exc:
         raise AccessDenied("source cannot be opened") from exc
     try:
@@ -161,7 +161,7 @@ def _load_manifest(path: Path) -> bytes:
         if os.name != "nt" and nofollow and hasattr(os, "O_DIRECTORY"):
             fd = _open_posix_absolute(path, os.O_RDONLY)
         else:
-            fd = os.open(path, os.O_RDONLY | nofollow)
+            fd = os.open(path, os.O_RDONLY | nofollow | getattr(os, "O_BINARY", 0))
     except OSError as exc:
         raise AccessDenied("manifest cannot be securely opened") from exc
     try:

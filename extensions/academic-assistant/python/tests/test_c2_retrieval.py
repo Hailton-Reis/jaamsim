@@ -277,3 +277,10 @@ class ContractTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_windows_source_reads_use_binary_mode():
+    """Windows os.open text mode would normalize CRLF and invalidate raw SHA-256."""
+    from pathlib import Path
+    source = (Path(__file__).resolve().parents[1] / "c2_retrieval.py").read_text(encoding="utf-8")
+    assert source.count('getattr(os, "O_BINARY", 0)') >= 2
