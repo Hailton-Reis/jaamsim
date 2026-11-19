@@ -1,0 +1,4 @@
+# Manifest SHA-256 assumes unmodified LF bytes on every OS.
+*.txt text eol=lf
+*.md text eol=lf
+*.json text eol=lf

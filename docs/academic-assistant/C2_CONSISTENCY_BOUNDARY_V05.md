@@ -38,3 +38,12 @@ A v0.4 usava `json.dumps(..., ensure_ascii=True)` para a resposta de CLI. O JSON
 Um novo teste headless Java, `C2PythonInteropContractTest.java`, realiza execução Java->Python->JSON em documentos sintéticos, incluindo busca positiva, abstenção e manifesto corrompido. O workflow JDK25/Ant deve incluir essa verificação após a compilação completa.
 
 Validação local adicional (Linux): 7 verificações de interoperabilidade Java/Python usando o **JAR real** v0.69 compilado em CI, 45 contratos com as classes reais do JAR e a suíte Python de 99 testes + 33 subtestes. Isso **não comprova build full da nova branch** e usa uma constante simulada de prompt durante o smoke test local; o CI da branch deverá executar com o módulo de chat real e JDK25.
+
+## Compatibilidade e correções após a primeira CI do PR #2
+
+A primeira execução da CI em 19/11/2026 identificou dois problemas reais de integração multiplataforma:
+
+1. O build Ant compila as classes de produção com destino Java 8, mesmo quando executado no JDK 25. `String.isBlank()` e `Files.readString()` não estão disponíveis nesse alvo. Foram substituídos por `trim().isEmpty()` e `new String(Files.readAllBytes(...), StandardCharsets.UTF_8)`.
+2. O checkout Windows convertia as quebras de linha de documentos sintéticos para CRLF, invalidando os hashes SHA-256 fixados no manifesto. O corpus C2 passou a conter `.gitattributes` para preservar LF em `.txt`, `.md` e `.json`. O ensaio Java->Python também passou a capturar stdout/stderr em arquivos UTF-8, como o executor real, evitando uma diferença de captura observada nos jobs Windows.
+
+Essas correções são candidatas para rerun da CI Linux/Windows e JDK25. Os bloqueios operacionais e científicos permanecem inalterados.

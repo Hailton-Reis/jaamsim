@@ -75,10 +75,10 @@ final class C2PreflightRunner {
 
     static Outcome execute(Path assistantRoot, Path corpusRoot, Path manifest, String question,
             String pythonCommand) throws Exception {
-        if (question == null || question.isBlank() || question.length() > MAX_QUESTION
+        if (question == null || question.trim().isEmpty() || question.length() > MAX_QUESTION
                 || question.indexOf('\0') >= 0)
             throw new IOException("A consulta precisa conter entre 1 e 2000 caracteres.");
-        if (assistantRoot == null || pythonCommand == null || pythonCommand.isBlank())
+        if (assistantRoot == null || pythonCommand == null || pythonCommand.trim().isEmpty())
             throw new IOException("Configure a raiz da extensão e o Python da candidata.");
         Path root = assistantRoot.toAbsolutePath().normalize();
         Path script = root.resolve("python").resolve("c2_chat_bridge.py");
@@ -133,7 +133,7 @@ final class C2PreflightRunner {
             String after = sha256(Files.readAllBytes(manifestFile));
             if (!before.equals(after))
                 throw new IOException("O manifesto foi alterado durante a consulta.");
-            JSONValue payload = JSONParser.parse(Files.readString(stdout, StandardCharsets.UTF_8));
+            JSONValue payload = JSONParser.parse(new String(Files.readAllBytes(stdout), StandardCharsets.UTF_8));
             return validatePayload(payload, question, before);
         }
         finally {

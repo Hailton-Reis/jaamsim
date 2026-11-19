@@ -41,9 +41,19 @@ def _isolated_cli(tmp_path, message, *, env=None):
                "--top-k=3", "--max-context-chars=8000"]
     # Environment that tries to inject import paths must not override script dir.
     settings = {**os.environ, **(env or {})}
-    result = subprocess.run(command, capture_output=True, text=True, timeout=8,
-                            cwd=root, env=settings, encoding="utf-8")
-    return result
+    # Redirect to UTF-8 files just like the Java ProcessBuilder does. A few
+    # Windows CI configurations expose stdout=None for captured subprocesses;
+    # reading the redirected file gives an explicit, cross-platform contract.
+    settings["PYTHONIOENCODING"] = "utf-8"
+    out_file = root / "c2_stdout.json"
+    err_file = root / "c2_stderr.txt"
+    with out_file.open("wb") as stdout, err_file.open("wb") as stderr:
+        completed = subprocess.run(command, stdout=stdout, stderr=stderr,
+                                   timeout=8, cwd=root, env=settings)
+    return subprocess.CompletedProcess(
+        command, completed.returncode,
+        stdout=out_file.read_text(encoding="utf-8"),
+        stderr=err_file.read_text(encoding="utf-8"))
 
 
 def test_java_cli_contract_with_real_subprocess(tmp_path):
@@ -112,3 +122,19 @@ def test_java_result_never_claims_response_from_llm():
     code = (JAVA_SOURCE / "C2PreflightRunner.java").read_text(encoding="utf-8")
     assert 'não é resposta de IA' in code
     assert 'Nenhuma evidência encontrada.' in code
+
+
+def test_synthetic_fixtures_keep_cross_platform_lf_and_pinned_hashes():
+    # The public fixture hashes represent repository bytes, not text after
+    # OS-dependent newline conversion. Git attributes preserve LF on Windows.
+    import hashlib
+    attributes = EXAMPLE / ".gitattributes"
+    policy = attributes.read_text(encoding="utf-8")
+    assert "*.txt text eol=lf" in policy
+    assert "*.md text eol=lf" in policy
+    assert "*.json text eol=lf" in policy
+    manifest = json.loads((EXAMPLE / "manifest.json").read_text(encoding="utf-8"))
+    for item in manifest["documents"]:
+        raw = (EXAMPLE / "corpus" / item["path"]).read_bytes()
+        assert b"\r\n" not in raw
+        assert hashlib.sha256(raw).hexdigest() == item["sha256"]
