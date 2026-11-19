@@ -66,6 +66,19 @@ public final class C2PreflightSwingSmokeTest {
         });
         return text[0];
     }
+    private static void awaitIdle(String status) throws Exception {
+        JButton run = field("runButton", JButton.class);
+        JLabel state = field("stateLabel", JLabel.class);
+        long deadline = System.nanoTime() + 30_000_000_000L;
+        boolean[] idle = {false};
+        while (System.nanoTime() < deadline) {
+            edt(() -> idle[0] = run.isEnabled() && state.getText().contains(status));
+            if (idle[0]) break;
+            Thread.sleep(80);
+        }
+        ok(idle[0], "terminal Swing state: " + status);
+    }
+
     private static void capture(Path target) throws Exception {
         if (GraphicsEnvironment.isHeadless()) return;
         Rectangle[] bounds = new Rectangle[1];
@@ -110,6 +123,43 @@ public final class C2PreflightSwingSmokeTest {
             field("queryArea", JTextArea.class).setText("pergunta editada");
             ok(field("resultsArea", JTextArea.class).getText().isEmpty(), "edited input clears old result");
         });
+        // ABA race: the text returns to the same original value while a query is running.
+        // The result must be discarded based on the revision, not merely string equality.
+        edt(() -> {
+            JTextArea input = field("queryArea", JTextArea.class);
+            JButton run = field("runButton", JButton.class);
+            input.setText("Queue Server");
+            run.doClick();
+            ok(!run.isEnabled(), "in-flight ABA test started");
+            input.setText("Queue Server alterada");
+            input.setText("Queue Server");
+        });
+        awaitIdle("Descartado");
+        edt(() -> {
+            ok(!field("resultsArea", JTextArea.class).getText().contains("[GUIA_SYNTH:L"),
+                    "ABA edits cannot revive a stale citation");
+            ok(field("cancelButton", JButton.class).isEnabled() == false,
+                    "cancel button returns to inactive after completion");
+        });
+
+        // User cancellation is explicit, and the previous citation cannot be reused.
+        edt(() -> {
+            JTextArea input = field("queryArea", JTextArea.class);
+            JButton run = field("runButton", JButton.class);
+            JButton cancel = field("cancelButton", JButton.class);
+            input.setText("Queue Server");
+            run.doClick();
+            ok(cancel.isEnabled(), "cancellation becomes available while searching");
+            cancel.doClick();
+        });
+        awaitIdle("Cancelada");
+        edt(() -> {
+            ok(!field("resultsArea", JTextArea.class).getText().contains("[GUIA_SYNTH:L"),
+                    "canceled query does not display evidence");
+            ok(!field("cancelButton", JButton.class).isEnabled(),
+                    "cancel button disabled after cancellation");
+        });
+
         String missing = ask("xylophonuradazquert", true);
         ok(missing.contains("Nenhuma evidência encontrada"), "unknown terms abstain");
         ok(!missing.contains("[GUIA_SYNTH:L"), "abstention has no old citation");
