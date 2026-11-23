@@ -118,12 +118,14 @@ def inspect(endpoint: str = DEFAULT_ENDPOINT, *, probe: bool = False,
     }
     if not probe:
         return result
-    result["network_calls"] = 2
     try:
+        result["network_calls"] += 1
         health = get_json(endpoint, "/health")
-        models = get_json(endpoint, "/v1/models")
         if not isinstance(health, dict) or health.get("status") not in ("ok", "ready"):
             raise ValueError("health_not_ready")
+        # Fail closed: do not query model metadata if the health gate fails.
+        result["network_calls"] += 1
+        models = get_json(endpoint, "/v1/models")
         if not isinstance(models, dict) or not isinstance(models.get("data"), list):
             raise ValueError("model_list_invalid")
         items = models["data"]
