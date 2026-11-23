@@ -41,7 +41,7 @@ def test_c2_dry_run_has_evidence_without_network(fixture_docs):
 
 
 def test_synthetic_c2_sends_only_allowed_messages_and_no_tools(fixture_docs):
-    citation = "GUIA_SYNTH:L1-L3"
+    citation = "GUIA_SYNTH:L1-L2"
     reply = {
         "model": NAME,
         "choices": [{
